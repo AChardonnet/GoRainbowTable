@@ -1,7 +1,28 @@
-package main
+package rainbowtable
 
 import "fmt"
 
 func main() {
-	fmt.Println("Hello World!")
+	const charset = "a-zA-Z0-9!#@+"
+	fmt.Println(generateCharset(charset))
+}
+
+func generateCharset(regex string) string {
+	result := []rune("")
+	runes := []rune(regex)
+
+	for i := 0; i < len(runes); i++ {
+		if i+2 < len(runes) && runes[i+1] == []rune("-")[0] {
+			start := runes[i]
+			end := runes[i+2]
+			for r := start; r <= end; r++ {
+				result = append(result, r)
+			}
+			i += 2
+		} else {
+			result = append(result, runes[i])
+		}
+	}
+
+	return string(result)
 }
