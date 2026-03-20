@@ -1,10 +1,13 @@
-package rainbowtable
+package main
 
-import "fmt"
+import (
+	"crypto/sha256"
+	"fmt"
+)
 
 func main() {
 	const charset = "a-zA-Z0-9!#@+"
-	fmt.Println(generateCharset(charset))
+	fmt.Println(hash("a"))
 }
 
 func generateCharset(regex string) string {
@@ -25,4 +28,9 @@ func generateCharset(regex string) string {
 	}
 
 	return string(result)
+}
+
+func hash(password string) string {
+	hash := sha256.Sum256([]byte(password))
+	return fmt.Sprintf("%x", hash)
 }
