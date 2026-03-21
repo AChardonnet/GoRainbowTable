@@ -3,14 +3,23 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 )
 
 const (
 	charset        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-"
 	passwordLength = 6
+	chainLength    = 1000
 )
 
 func main() {
+	generateChain("a")
+}
+
+type TableEntry struct {
+	Start string
+	End   [32]byte
 }
 
 func generateCharset(regex string) string {
@@ -48,4 +57,24 @@ func reduce(hash [32]byte, column int) string {
 		val /= uint64(len(charset))
 	}
 	return string(result)
+}
+
+func generateChain(startPlain string) TableEntry {
+	currentPlain := startPlain
+	var currentHash [32]byte
+
+	for i := 0; i < chainLength; i++ {
+		currentHash = hash(currentPlain)
+
+		fmt.Printf("Round %d | Plain : %s Hash : %s\n", i, currentPlain, hex.EncodeToString(currentHash[:]))
+
+		if i < chainLength-1 {
+			currentPlain = reduce(currentHash, i)
+		}
+	}
+
+	return TableEntry{
+		Start: startPlain,
+		End:   currentHash,
+	}
 }

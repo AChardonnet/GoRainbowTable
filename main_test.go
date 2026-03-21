@@ -47,3 +47,21 @@ func TestReduce(t *testing.T) {
 		t.Errorf("got %s, wanted %s", got, wanted)
 	}
 }
+
+func TestGenerateChain(t *testing.T) {
+	got := generateChain("a")
+
+	temp, err := hex.DecodeString("167f77bdbcbd83ba7366cbd55f9cc87c98e7f5e5e35b130fb6915347c2d0fe6e")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	wanted := TableEntry{
+		Start: "a",
+		End:   [32]byte(temp),
+	}
+
+	if got != wanted {
+		t.Errorf("got %s, wanted %s", got, wanted)
+	}
+}
