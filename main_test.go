@@ -57,9 +57,9 @@ func TestGenerateChain(t *testing.T) {
 	}
 
 	wanted := TableEntry{
-		Start: "a",
-		End:   [32]byte(temp),
+		End: [32]byte(temp),
 	}
+	copy(wanted.Start[:], "a")
 
 	if got != wanted {
 		t.Errorf("got %s, wanted %s", got, wanted)
