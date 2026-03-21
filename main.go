@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -138,7 +139,7 @@ func generateTable(verbose ...bool) {
 	}
 
 	creationTime := time.Now().Format("2006-01-02_15-04-05")
-	path := dir + "\\" + creationTime + ".rtable"
+	path := filepath.Join(dir, creationTime+".rtable")
 
 	err = saveTable(path, table)
 	if err != nil {
