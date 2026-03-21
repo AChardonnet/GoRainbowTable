@@ -30,7 +30,7 @@ func generateCharset(regex string) string {
 	return string(result)
 }
 
-func hash(password string) string {
+func hash(password string) [32]byte {
 	hash := sha256.Sum256([]byte(password))
-	return fmt.Sprintf("%x", hash)
+	return hash
 }

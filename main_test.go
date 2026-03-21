@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"encoding/hex"
+	"log"
+	"testing"
+)
 
 func TestGenerateCharset(t *testing.T) {
 	got := generateCharset("a-zA-Z0-9!#@+-")
@@ -13,16 +17,24 @@ func TestGenerateCharset(t *testing.T) {
 
 func TestHash(t *testing.T) {
 	got := hash("a")
-	wanted := "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+	wanted, err := hex.DecodeString("ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb")
 
-	if got != wanted {
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if got != [32]byte(wanted) {
 		t.Errorf("got %s, wanted %s", got, wanted)
 	}
 
 	got = hash("b")
-	wanted = "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d"
+	wanted, err = hex.DecodeString("3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d")
 
-	if got != wanted {
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if got != [32]byte(wanted) {
 		t.Errorf("got %s, wanted %s", got, wanted)
 	}
 }
