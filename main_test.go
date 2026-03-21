@@ -38,3 +38,12 @@ func TestHash(t *testing.T) {
 		t.Errorf("got %s, wanted %s", got, wanted)
 	}
 }
+
+func TestReduce(t *testing.T) {
+	got := reduce(hash("a"), 0)
+	wanted := "EvBSP6"
+
+	if got != wanted {
+		t.Errorf("got %s, wanted %s", got, wanted)
+	}
+}

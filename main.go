@@ -2,12 +2,15 @@ package main
 
 import (
 	"crypto/sha256"
-	"fmt"
+	"encoding/binary"
+)
+
+const (
+	charset        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-"
+	passwordLength = 6
 )
 
 func main() {
-	const charset = "a-zA-Z0-9!#@+"
-	fmt.Println(hash("a"))
 }
 
 func generateCharset(regex string) string {
@@ -33,4 +36,16 @@ func generateCharset(regex string) string {
 func hash(password string) [32]byte {
 	hash := sha256.Sum256([]byte(password))
 	return hash
+}
+
+func reduce(hash [32]byte, column int) string {
+	val := binary.BigEndian.Uint64(hash[:8])
+	val += uint64(column)
+
+	result := make([]byte, passwordLength)
+	for i := 0; i < passwordLength; i++ {
+		result[i] = charset[val%uint64(len(charset))]
+		val /= uint64(len(charset))
+	}
+	return string(result)
 }
