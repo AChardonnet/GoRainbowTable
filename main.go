@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -15,11 +16,18 @@ const (
 	charset        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-"
 	passwordLength = 6
 	chainLength    = 1000
-	chainsNumber   = 10000
+	chainsNumber   = 100000
+	workerNumber   = 8
 )
 
+func printIfVerbose(isVerbose bool, format string, a ...any) {
+	if isVerbose {
+		fmt.Printf(format, a...)
+	}
+}
+
 func main() {
-	generateTable(true)
+	generateTableMultiThread(true)
 }
 
 type TableEntry struct {
@@ -75,9 +83,7 @@ func generateChain(startPlain string, verbose ...bool) TableEntry {
 	for i := 0; i < chainLength; i++ {
 		currentHash = hash(currentPlain)
 
-		if isVerbose {
-			fmt.Printf("Round %d | Plain : %s Hash : %s\n", i, currentPlain, hex.EncodeToString(currentHash[:]))
-		}
+		printIfVerbose(isVerbose, "Round %d | Plain : %s Hash : %s\n", i, currentPlain, hex.EncodeToString(currentHash[:]))
 
 		if i < chainLength-1 {
 			currentPlain = reduce(currentHash, i)
@@ -102,8 +108,16 @@ func seed(i int) string {
 	return string(result)
 }
 
-func saveTable(filename string, table []TableEntry) error {
-	file, err := os.Create(filename)
+func saveTable(table []TableEntry, isVerbose bool) error {
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	creationTime := time.Now().Format("2006-01-02_15-04-05")
+	path := filepath.Join(dir, creationTime+".rtable")
+
+	file, err := os.Create(path)
 	if err != nil {
 		return err
 	}
@@ -115,10 +129,12 @@ func saveTable(filename string, table []TableEntry) error {
 			return err
 		}
 	}
+
+	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 	return nil
 }
 
-func generateTable(verbose ...bool) {
+func generateTableSingleThread(verbose ...bool) {
 	isVerbose := false
 	if len(verbose) > 0 {
 		isVerbose = verbose[0]
@@ -126,26 +142,62 @@ func generateTable(verbose ...bool) {
 	table := make([]TableEntry, 0, chainsNumber)
 	for i := 0; i < chainsNumber; i++ {
 		chain := generateChain(seed(i))
-		if isVerbose {
-			fmt.Printf("Chain %d | Start : %s End : %s\n", i, chain.Start, hex.EncodeToString(chain.End[:]))
-		}
+		printIfVerbose(isVerbose, "Chain %d | Start : %s End : %s\n", i, chain.Start, hex.EncodeToString(chain.End[:]))
 		table = append(table, chain)
 	}
 
-	dir, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error retrieving current directory:", err)
-		return
-	}
-
-	creationTime := time.Now().Format("2006-01-02_15-04-05")
-	path := filepath.Join(dir, creationTime+".rtable")
-
-	err = saveTable(path, table)
+	err := saveTable(table, isVerbose)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if isVerbose {
-		fmt.Printf("Table saved to %s\n", path)
+}
+
+func worker(id int, jobs <-chan string, results chan<- TableEntry, wg *sync.WaitGroup, isVerbose bool) {
+	defer wg.Done()
+	for start := range jobs {
+		results <- generateChain(start)
+		printIfVerbose(isVerbose, "Worker : %d | Job finished\n", id)
 	}
+}
+
+func generateTableMultiThread(verbose ...bool) {
+	isVerbose := false
+	if len(verbose) > 0 {
+		isVerbose = true
+	}
+	jobs := make(chan string, 100)
+	results := make(chan TableEntry, 100)
+	var wg sync.WaitGroup
+
+	printIfVerbose(isVerbose, "Creating Workers... ")
+
+	for w := 0; w < workerNumber; w++ {
+		wg.Add(1)
+		go worker(w, jobs, results, &wg, isVerbose)
+	}
+
+	printIfVerbose(isVerbose, "Done \n")
+	printIfVerbose(isVerbose, "Starting Jobs")
+
+	table := make([]TableEntry, 0, chainsNumber)
+	done := make(chan bool)
+	go func() {
+		for entry := range results {
+			table = append(table, entry)
+		}
+		done <- true
+	}()
+
+	for i := 0; i < chainsNumber; i++ {
+		jobs <- seed(i)
+	}
+	close(jobs)
+
+	wg.Wait()
+	close(results)
+	<-done
+
+	printIfVerbose(isVerbose, "Chains Generated\n")
+
+	saveTable(table, isVerbose)
 }
