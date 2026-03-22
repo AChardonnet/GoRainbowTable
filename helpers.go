@@ -271,3 +271,17 @@ func calculateSuccessProbability(chains int, length int, passwordLength int, cha
 	}
 	return probability
 }
+
+func calculateRequiredChains(targetProb float64, chainLen int, passLen int, charset string) uint64 {
+	if targetProb >= 1.0 {
+		targetProb = 0.9999 // Probability cannot be 1.0 (infinite chains)
+	}
+
+	// Keyspace Size (M = charsetLength ^ passwordLength)
+	keyspace := math.Pow(float64(len(charset)), float64(passLen))
+
+	// N = -(M * ln(1 - P)) / L
+	n := -(keyspace * math.Log(1-targetProb)) / float64(chainLen)
+
+	return uint64(math.Ceil(n))
+}

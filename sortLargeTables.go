@@ -74,6 +74,10 @@ func SortLargeTable(inputPath string, chunkSize int) error {
 		mpb.AppendDecorators(decor.Percentage()),
 	)
 
+	if chunkSize > int(header.NumChains) {
+		chunkSize = int(header.NumChains)
+	}
+
 	file, _ := os.Open(inputPath)
 	defer file.Close()
 
@@ -227,12 +231,24 @@ func mergeChunks(header FileHeader, charset string, tempPaths []string, mainBar 
 		}
 	}
 
+	var lastWrittenHash [32]byte
+	var uniqueCount uint64 = 0
+	firstEntry := true
 	progressUpdate := 0
 	for hp.Len() > 0 {
 		// Get smallest End hash
 		minItem := heap.Pop(hp).(MergeItem)
-		out.Write(minItem.Entry.Start)
-		out.Write(minItem.Entry.End[:])
+		currentEntry := minItem.Entry
+
+		// Deduplication Check
+		if firstEntry || !bytes.Equal(currentEntry.End[:], lastWrittenHash[:]) {
+			out.Write(currentEntry.Start)
+			out.Write(currentEntry.End[:])
+
+			lastWrittenHash = currentEntry.End
+			uniqueCount++
+			firstEntry = false
+		}
 
 		// Read next item from the file we just pulled from
 		next := readNext(files[minItem.FileIndex], int(header.PasswordLength))
@@ -247,6 +263,13 @@ func mergeChunks(header FileHeader, charset string, tempPaths []string, mainBar 
 	}
 	mainBar.IncrBy(2 * (progressUpdate % 1000))
 	mergeBar.IncrBy(2 * (progressUpdate % 1000))
+
+	header.NumChains = uniqueCount
+
+	out.Seek(0, io.SeekStart)
+	binary.Write(out, binary.BigEndian, header)
+
+	out.Sync()
 
 	for _, f := range files {
 		err := f.Close()

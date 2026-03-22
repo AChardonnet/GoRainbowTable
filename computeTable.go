@@ -122,7 +122,7 @@ func worker(id int, jobs <-chan string, results chan<- TableEntry, wg *sync.Wait
 	}
 }
 
-func generateTableMultiThread(workerNumber int, chainLength int, passwordLength int, charset string, chainsNumber int, verbose ...bool) {
+func generateTableMultiThread(workerNumber int, chainLength int, passwordLength int, charset string, chainsNumber int, verbose ...bool) (path string) {
 	isVerbose := false
 	if len(verbose) > 0 {
 		isVerbose = true
@@ -140,7 +140,7 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 	}
 
 	creationTime := time.Now().Format("2006-01-02_15-04-05")
-	path := filepath.Join(tablesDir, creationTime+".rtable")
+	path = filepath.Join(tablesDir, creationTime+".rtable")
 
 	file, err := os.Create(path)
 	if err != nil {
@@ -153,7 +153,7 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 		Version:        1,
 		PasswordLength: uint32(passwordLength),
 		ChainLength:    uint32(chainLength),
-		NumChains:      0,
+		NumChains:      uint64(chainsNumber),
 		CharsetLength:  uint32(len(charset)),
 		IsSorted:       0,
 	}
@@ -167,7 +167,6 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 
 	jobs := make(chan string, 100)
 	results := make(chan TableEntry, 100)
-	countChan := make(chan uint64)
 	var wg sync.WaitGroup
 
 	printIfVerbose(isVerbose, "Creating Workers... ")
@@ -200,7 +199,7 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 		),
 	)
 	done := make(chan bool)
-	go collectResults(results, done, countChan, isVerbose, bar, file, chainsNumber)
+	go collectResults(results, done, isVerbose, bar, file, chainsNumber)
 
 	for i := 0; i < chainsNumber; i++ {
 		jobs <- seed(i, passwordLength, charset)
@@ -209,39 +208,30 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 
 	wg.Wait()
 	close(results)
-	finalCount := <-countChan
 	<-done
 
-	header.NumChains = finalCount
 	file.Seek(0, io.SeekStart)
 	binary.Write(file, binary.BigEndian, header)
 
 	progressBar.Wait()
 	printIfVerbose(isVerbose, "Chains Generated\n")
 	printIfVerbose(isVerbose, "Table saved to %s\n", path)
+
+	return path
 }
 
-func collectResults(results <-chan TableEntry, done chan bool, countChan chan uint64, isVerbose bool, bar *mpb.Bar, file *os.File, chainsNumber int) {
-	endHashes := make(map[[32]byte]struct{}, chainsNumber)
-	uniqueCount := uint64(0)
+func collectResults(results <-chan TableEntry, done chan bool, isVerbose bool, bar *mpb.Bar, file *os.File, chainsNumber int) {
 	updateBar := 0
-
 	for entry := range results {
-		if _, exists := endHashes[entry.End]; !exists {
-			endHashes[entry.End] = struct{}{}
 
-			file.Write([]byte(entry.Start))
-			file.Write(entry.End[:])
+		file.Write([]byte(entry.Start))
+		file.Write(entry.End[:])
 
-			uniqueCount++
-		}
 		if updateBar%1000 == 0 {
 			bar.IncrBy(1000)
 		}
 		updateBar++
 	}
-	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", chainsNumber-int(uniqueCount))
-	countChan <- uniqueCount
-	close(countChan)
+	bar.IncrBy(updateBar % 1000)
 	done <- true
 }
