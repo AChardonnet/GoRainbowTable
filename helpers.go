@@ -71,11 +71,15 @@ func reduce(hash [32]byte, column int, passwordLength int, charset string) strin
 }
 
 func seed(i int, passwordLength int, charset string) string {
-	index := uint64(i)
+	scrambled := uint64(i) * 0x9E3779B97F4A7C15 //golden ratio
+
 	result := make([]byte, passwordLength)
-	for i := 0; i < passwordLength; i++ {
-		result[i] = charset[index%uint64(len(charset))]
-		index /= uint64(len(charset))
+	charsetLen := uint64(len(charset))
+
+	for j := 0; j < passwordLength; j++ {
+		result[j] = charset[scrambled%charsetLen]
+		scrambled /= charsetLen
+		scrambled ^= 0xBF58476D1CE4E5B9 // Splitmix64
 	}
 	return string(result)
 }
