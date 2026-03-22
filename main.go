@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -27,7 +28,9 @@ func printIfVerbose(isVerbose bool, format string, a ...any) {
 }
 
 func main() {
-	generateTableMultiThread(true)
+	// generateTableMultiThread(true)
+	table, _ := loadTable("2026-03-22_01-15-38.rtable")
+	printTable(table)
 }
 
 type TableEntry struct {
@@ -132,6 +135,34 @@ func saveTable(table []TableEntry, isVerbose bool) error {
 
 	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 	return nil
+}
+
+func loadTable(filename string) ([]TableEntry, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var table []TableEntry
+	for {
+		var entry TableEntry
+		err := binary.Read(file, binary.BigEndian, &entry)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		table = append(table, entry)
+	}
+	return table, nil
+}
+
+func printTable(table []TableEntry) {
+	for _, entry := range table {
+		fmt.Printf("Start : %s End : %s \n", entry.Start, hex.EncodeToString(entry.End[:]))
+	}
 }
 
 func generateTableSingleThread(verbose ...bool) {
