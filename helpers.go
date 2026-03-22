@@ -141,9 +141,59 @@ func readTableHeader(filename string) (FileHeader, string, error) {
 }
 
 func printTable(table []TableEntry) {
-	for _, entry := range table {
-		fmt.Printf("Start : %s End : %s \n", entry.Start, hex.EncodeToString(entry.End[:]))
+	for i, entry := range table {
+		fmt.Printf("Entry %d | Start : %-10s End : %s\n",
+			i,
+			string(entry.Start),
+			hex.EncodeToString(entry.End[:]),
+		)
 	}
+}
+
+func readFirstTableEntries(filename string, n int) ([]TableEntry, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	header, charset, err := readTableHeader(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	headerSize := uint32(binary.Size(header))
+	charsetSize := uint32(len(charset))
+	totalBeforePadding := headerSize + charsetSize
+	paddingSize := (8 - (totalBeforePadding % 8)) % 8
+
+	dataStartOffset := int64(totalBeforePadding + paddingSize)
+
+	_, err = file.Seek(dataStartOffset, io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+
+	table := make([]TableEntry, 0, n)
+	for i := 0; i < n; i++ {
+		entry := TableEntry{
+			Start: make([]byte, header.PasswordLength),
+		}
+
+		if _, err := io.ReadFull(file, entry.Start); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+
+		if _, err := io.ReadFull(file, entry.End[:]); err != nil {
+			return nil, err
+		}
+
+		table = append(table, entry)
+	}
+	return table, nil
 }
 
 func saveTableWithHeader(

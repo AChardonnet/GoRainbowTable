@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -10,7 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/schollz/progressbar/v3"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 )
 
 func generateChain(startPlain string, chainLength int, passwordLength int, charset string, verbose ...bool) TableEntry {
@@ -31,9 +33,8 @@ func generateChain(startPlain string, chainLength int, passwordLength int, chars
 		}
 	}
 
-	var startBytes []byte
 	return TableEntry{
-		Start: startBytes,
+		Start: []byte(startPlain),
 		End:   currentHash,
 	}
 }
@@ -178,8 +179,26 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 
 	printIfVerbose(isVerbose, "Done \n")
 
-	bar := progressbar.Default(int64(chainsNumber), "Generating Table")
+	progressBar := mpb.New(mpb.WithAutoRefresh())
 
+	elapsedDec := decor.Elapsed(decor.ET_STYLE_GO)
+	etaDec := decor.AverageETA(decor.ET_STYLE_GO)
+	bar := progressBar.AddBar(
+		int64(chainsNumber),
+		mpb.PrependDecorators(
+			decor.Name("Generating Table", decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+			decor.OnComplete(
+				decor.Any(func(st decor.Statistics) string {
+					elapsedStr, _ := elapsedDec.Decor(st)
+					etaStr, _ := etaDec.Decor(st)
+					return fmt.Sprintf("[%s : %s]", elapsedStr, etaStr)
+				}), "done",
+			),
+		),
+		mpb.AppendDecorators(decor.CountersNoUnit("%d / %d"),
+			decor.AverageSpeed(0, " %.2f it/s", decor.WC{W: 10}),
+		),
+	)
 	done := make(chan bool)
 	go collectResults(results, done, countChan, isVerbose, bar, file, chainsNumber)
 
@@ -201,7 +220,7 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 }
 
-func collectResults(results <-chan TableEntry, done chan bool, countChan chan uint64, isVerbose bool, bar *progressbar.ProgressBar, file *os.File, chainsNumber int) {
+func collectResults(results <-chan TableEntry, done chan bool, countChan chan uint64, isVerbose bool, bar *mpb.Bar, file *os.File, chainsNumber int) {
 	endHashes := make(map[[32]byte]struct{}, chainsNumber)
 	uniqueCount := uint64(0)
 	updateBar := 0
@@ -210,13 +229,13 @@ func collectResults(results <-chan TableEntry, done chan bool, countChan chan ui
 		if _, exists := endHashes[entry.End]; !exists {
 			endHashes[entry.End] = struct{}{}
 
-			file.Write(entry.Start)
+			file.Write([]byte(entry.Start))
 			file.Write(entry.End[:])
 
 			uniqueCount++
 		}
 		if updateBar%1000 == 0 {
-			bar.Add(1000)
+			bar.IncrBy(1000)
 		}
 		updateBar++
 	}
