@@ -11,15 +11,23 @@ import (
 func main() {
 	stay := true
 
+	//default Settings
+	var (
+		charset        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-"
+		passwordLength = 6
+		chainLength    = 5000
+		chainsNumber   = 10000000
+		workerNumber   = 20
+	)
+
 	dir, _ := os.Getwd()
 	tablesDir := filepath.Join(dir, "tables")
 	for stay {
-		items := []string{"List Tables", "Compute Table", "Search Table", "Exit"}
+		items := []string{"List Tables", "Compute Table", "Search Table", "Settings", "Exit"}
 
 		prompt := promptui.Select{
 			Label: "Select Action",
 			Items: items,
-			// You can customize the icons too
 			Templates: &promptui.SelectTemplates{
 				Selected: "{{ . | green }}",
 			},
@@ -35,7 +43,11 @@ func main() {
 		switch index {
 		case 0:
 			printListTables(tablesDir)
+		case 1:
+			computeTable(workerNumber, chainLength, passwordLength, charset, chainsNumber)
 		case 3:
+			settingsMenu(workerNumber, chainLength, passwordLength, charset, chainsNumber)
+		case 4:
 			stay = false
 		}
 	}

@@ -216,6 +216,7 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 	file.Seek(0, io.SeekStart)
 	binary.Write(file, binary.BigEndian, header)
 
+	progressBar.Wait()
 	printIfVerbose(isVerbose, "Chains Generated\n")
 	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 }

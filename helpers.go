@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 )
@@ -245,4 +246,24 @@ func sortTable(table []TableEntry) []TableEntry {
 		return bytes.Compare(table[i].End[:], table[j].End[:]) < 0
 	})
 	return table
+}
+
+func calculateSuccessProbability(chains int, length int, passwordLength int, charset string) float64 {
+	keyspace := math.Pow(float64(len(charset)), float64(passwordLength))
+
+	currentM := float64(chains)
+	var totalUniquePoints float64 = 0
+
+	for i := 0; i < length; i++ {
+		totalUniquePoints += currentM
+
+		currentM = keyspace * (1 - math.Exp(-currentM/keyspace))
+	}
+
+	probability := totalUniquePoints / keyspace
+
+	if probability > 1.0 {
+		return 1.0
+	}
+	return probability
 }
