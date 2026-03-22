@@ -180,13 +180,8 @@ func generateTableMultiThread(verbose ...bool) {
 	printIfVerbose(isVerbose, "Starting Jobs")
 
 	table := make([]TableEntry, 0, chainsNumber)
-	done := make(chan bool)
-	go func() {
-		for entry := range results {
-			table = append(table, entry)
-		}
-		done <- true
-	}()
+	done := make(chan []TableEntry)
+	go collectResults(results, done, isVerbose)
 
 	for i := 0; i < chainsNumber; i++ {
 		jobs <- seed(i)
@@ -195,9 +190,28 @@ func generateTableMultiThread(verbose ...bool) {
 
 	wg.Wait()
 	close(results)
-	<-done
+	table = <-done
 
 	printIfVerbose(isVerbose, "Chains Generated\n")
 
 	saveTable(table, isVerbose)
+}
+
+func collectResults(results <-chan TableEntry, done chan []TableEntry, isVerbose bool) {
+	endHashes := make(map[[32]byte]struct{}, chainsNumber)
+	finalTable := make([]TableEntry, 0, chainsNumber)
+
+	collisions := 0
+
+	for entry := range results {
+		if _, exists := endHashes[entry.End]; exists {
+			collisions++
+		} else {
+			endHashes[entry.End] = struct{}{}
+			finalTable = append(finalTable, entry)
+		}
+
+	}
+	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", collisions)
+	done <- finalTable
 }
