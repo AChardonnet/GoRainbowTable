@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"log"
 	"testing"
+)
+
+var (
+	charset        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-"
+	passwordLength = 6
+	chainLength    = 1000
 )
 
 func TestGenerateCharset(t *testing.T) {
@@ -40,7 +47,7 @@ func TestHash(t *testing.T) {
 }
 
 func TestReduce(t *testing.T) {
-	got := reduce(hash("a"), 0)
+	got := reduce(hash("a"), 0, 6, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-")
 	wanted := "EvBSP6"
 
 	if got != wanted {
@@ -49,7 +56,7 @@ func TestReduce(t *testing.T) {
 }
 
 func TestGenerateChain(t *testing.T) {
-	got := generateChain("a")
+	got := generateChain("a", 1000, 6, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-")
 
 	temp, err := hex.DecodeString("167f77bdbcbd83ba7366cbd55f9cc87c98e7f5e5e35b130fb6915347c2d0fe6e")
 	if err != nil {
@@ -61,7 +68,12 @@ func TestGenerateChain(t *testing.T) {
 	}
 	copy(wanted.Start[:], "a")
 
-	if got != wanted {
-		t.Errorf("got %s, wanted %s", got, wanted)
+	if !bytes.Equal(got.Start, wanted.Start) {
+		t.Errorf("Start mismatch: got %s, wanted %s", got.Start, wanted.Start)
+	}
+
+	// Compare the End array (this still works with != because it's a fixed array)
+	if got.End != wanted.End {
+		t.Errorf("End hash mismatch:\nGot:    %x\nWanted: %x", got.End, wanted.End)
 	}
 }
