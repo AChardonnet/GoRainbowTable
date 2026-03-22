@@ -9,7 +9,7 @@ const (
 )
 
 func main() {
-	// generateTableMultiThread(true)
-	table, _ := loadTable("2026-03-22_01-15-38.rtable")
-	printTable(table)
+	generateTableMultiThread(true)
+	// table, _ := loadTable("2026-03-22_01-15-38.rtable")
+	// printTable(table)
 }

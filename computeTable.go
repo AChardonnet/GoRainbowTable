@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 type TableEntry struct {
@@ -49,8 +51,14 @@ func saveTable(table []TableEntry, isVerbose bool) error {
 		return err
 	}
 
+	tablesDir := filepath.Join(dir, "tables")
+	err = os.MkdirAll(tablesDir, 0755)
+	if err != nil {
+		return err
+	}
+
 	creationTime := time.Now().Format("2006-01-02_15-04-05")
-	path := filepath.Join(dir, creationTime+".rtable")
+	path := filepath.Join(tablesDir, creationTime+".rtable")
 
 	file, err := os.Create(path)
 	if err != nil {
@@ -102,24 +110,53 @@ func generateTableSingleThread(verbose ...bool) {
 	if len(verbose) > 0 {
 		isVerbose = verbose[0]
 	}
-	table := make([]TableEntry, 0, chainsNumber)
-	for i := 0; i < chainsNumber; i++ {
-		chain := generateChain(seed(i))
-		printIfVerbose(isVerbose, "Chain %d | Start : %s End : %s\n", i, chain.Start, hex.EncodeToString(chain.End[:]))
-		table = append(table, chain)
-	}
 
-	err := saveTable(table, isVerbose)
+	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	tablesDir := filepath.Join(dir, "tables")
+	err = os.MkdirAll(tablesDir, 0755)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	creationTime := time.Now().Format("2006-01-02_15-04-05")
+	path := filepath.Join(tablesDir, creationTime+".rtable")
+
+	file, err := os.Create(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	endHashes := make(map[[32]byte]struct{}, chainsNumber)
+	collisions := 0
+
+	for i := 0; i < chainsNumber; i++ {
+		chain := generateChain(seed(i))
+		printIfVerbose(isVerbose, "Chain %d | Start : %s End : %s\n", i, chain.Start, hex.EncodeToString(chain.End[:]))
+
+		if _, exists := endHashes[chain.End]; exists {
+			collisions++
+		} else {
+			endHashes[chain.End] = struct{}{}
+			err := binary.Write(file, binary.BigEndian, chain)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+
+	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", collisions)
+	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 }
 
-func worker(id int, jobs <-chan string, results chan<- TableEntry, wg *sync.WaitGroup, isVerbose bool) {
+func worker(id int, jobs <-chan string, results chan<- TableEntry, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for start := range jobs {
 		results <- generateChain(start)
-		printIfVerbose(isVerbose, "Worker : %d | Job finished\n", id)
 	}
 }
 
@@ -128,6 +165,27 @@ func generateTableMultiThread(verbose ...bool) {
 	if len(verbose) > 0 {
 		isVerbose = true
 	}
+
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tablesDir := filepath.Join(dir, "tables")
+	err = os.MkdirAll(tablesDir, 0755)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	creationTime := time.Now().Format("2006-01-02_15-04-05")
+	path := filepath.Join(tablesDir, creationTime+".rtable")
+
+	file, err := os.Create(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
 	jobs := make(chan string, 100)
 	results := make(chan TableEntry, 100)
 	var wg sync.WaitGroup
@@ -136,15 +194,15 @@ func generateTableMultiThread(verbose ...bool) {
 
 	for w := 0; w < workerNumber; w++ {
 		wg.Add(1)
-		go worker(w, jobs, results, &wg, isVerbose)
+		go worker(w, jobs, results, &wg)
 	}
 
 	printIfVerbose(isVerbose, "Done \n")
+	bar := progressbar.Default(int64(chainsNumber), "Generating Table")
 	printIfVerbose(isVerbose, "Starting Jobs")
 
-	table := make([]TableEntry, 0, chainsNumber)
-	done := make(chan []TableEntry)
-	go collectResults(results, done, isVerbose)
+	done := make(chan bool)
+	go collectResults(results, done, isVerbose, bar, file)
 
 	for i := 0; i < chainsNumber; i++ {
 		jobs <- seed(i)
@@ -153,28 +211,32 @@ func generateTableMultiThread(verbose ...bool) {
 
 	wg.Wait()
 	close(results)
-	table = <-done
+	<-done
 
 	printIfVerbose(isVerbose, "Chains Generated\n")
-
-	saveTable(table, isVerbose)
+	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 }
 
-func collectResults(results <-chan TableEntry, done chan []TableEntry, isVerbose bool) {
+func collectResults(results <-chan TableEntry, done chan bool, isVerbose bool, bar *progressbar.ProgressBar, file *os.File) {
 	endHashes := make(map[[32]byte]struct{}, chainsNumber)
-	finalTable := make([]TableEntry, 0, chainsNumber)
-
 	collisions := 0
+	updateBar := 0
 
 	for entry := range results {
 		if _, exists := endHashes[entry.End]; exists {
 			collisions++
 		} else {
 			endHashes[entry.End] = struct{}{}
-			finalTable = append(finalTable, entry)
+			err := binary.Write(file, binary.BigEndian, entry)
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
-
+		if updateBar%1000 == 0 {
+			bar.Add(1000)
+		}
+		updateBar++
 	}
 	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", collisions)
-	done <- finalTable
+	done <- true
 }
