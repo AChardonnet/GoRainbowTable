@@ -29,7 +29,7 @@ func searchTable(targetHash [32]byte, table []TableEntry, chainLength int, passw
 	// uses binary search : MUST be used with SORTED TABLES (by End)
 	for column := chainLength - 1; column >= 0; column-- {
 		currentHash := targetHash
-		for i := column; i < chainLength; i++ {
+		for i := column; i < chainLength-1; i++ {
 			plain := reduce(currentHash, i, passwordLength, charset)
 			currentHash = hash(plain)
 		}
@@ -67,7 +67,7 @@ func searchWorker(
 			return
 		default:
 			currentHash := targetHash
-			for i := column; i < chainLength; i++ {
+			for i := column; i < chainLength-1; i++ {
 				plain := reduce(currentHash, i, passwordLength, charset)
 				currentHash = hash(plain)
 			}
