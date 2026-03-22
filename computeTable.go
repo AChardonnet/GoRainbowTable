@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ func generateChain(startPlain string, chainLength int, passwordLength int, chars
 	}
 }
 
-func generateTableSingleThread(chainsNumber int, passwordLength int, charset string, chainLength int, verbose ...bool) {
+func generateTableSingleThread(chainsNumber int, passwordLength int, charset string, chainLength int, usedCharset string, verbose ...bool) {
 	isVerbose := false
 	if len(verbose) > 0 {
 		isVerbose = verbose[0]
@@ -63,25 +64,53 @@ func generateTableSingleThread(chainsNumber int, passwordLength int, charset str
 	}
 	defer file.Close()
 
+	headerSize := uint32(binary.Size(FileHeader{}))
+	charsetSize := uint32(len(usedCharset))
+	totalBeforePadding := headerSize + charsetSize
+
+	paddingSize := (8 - (totalBeforePadding % 8)) % 8
+
+	header := FileHeader{
+		Magic:          [4]byte{'R', 'B', 'O', 'W'},
+		Version:        1,
+		PasswordLength: uint32(passwordLength),
+		ChainLength:    uint32(chainLength),
+		NumChains:      uint64(0),
+		CharsetLength:  uint32(len(usedCharset)),
+		IsSorted:       0,
+	}
+
+	binary.Write(file, binary.BigEndian, header)
+
+	file.Write([]byte(usedCharset))
+
+	if paddingSize > 0 {
+		padding := make([]byte, paddingSize)
+		file.Write(padding)
+	}
+
 	endHashes := make(map[[32]byte]struct{}, chainsNumber)
-	collisions := 0
+	savedChains := uint64(0)
 
 	for i := 0; i < chainsNumber; i++ {
 		chain := generateChain(seed(i, passwordLength, charset), chainLength, passwordLength, charset)
 		printIfVerbose(isVerbose, "Chain %d | Start : %s End : %s\n", i, chain.Start, hex.EncodeToString(chain.End[:]))
 
-		if _, exists := endHashes[chain.End]; exists {
-			collisions++
-		} else {
+		if _, exists := endHashes[chain.End]; !exists {
 			endHashes[chain.End] = struct{}{}
-			err := binary.Write(file, binary.BigEndian, chain)
-			if err != nil {
-				log.Fatal(err)
-			}
+
+			file.Write(chain.Start)
+			file.Write(chain.End[:])
+
+			savedChains++
 		}
 	}
 
-	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", collisions)
+	header.NumChains = savedChains
+	file.Seek(0, io.SeekStart)
+	binary.Write(file, binary.BigEndian, header)
+
+	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", chainsNumber-int(savedChains))
 	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 }
 
@@ -118,8 +147,26 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 	}
 	defer file.Close()
 
+	header := FileHeader{
+		Magic:          [4]byte{'R', 'B', 'O', 'W'},
+		Version:        1,
+		PasswordLength: uint32(passwordLength),
+		ChainLength:    uint32(chainLength),
+		NumChains:      0,
+		CharsetLength:  uint32(len(charset)),
+		IsSorted:       0,
+	}
+	binary.Write(file, binary.BigEndian, header)
+	file.Write([]byte(charset))
+
+	paddingSize := (8 - ((uint32(binary.Size(header)) + uint32(len(charset))) % 8)) % 8
+	if paddingSize > 0 {
+		file.Write(make([]byte, paddingSize))
+	}
+
 	jobs := make(chan string, 100)
 	results := make(chan TableEntry, 100)
+	countChan := make(chan uint64)
 	var wg sync.WaitGroup
 
 	printIfVerbose(isVerbose, "Creating Workers... ")
@@ -134,7 +181,7 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 	bar := progressbar.Default(int64(chainsNumber), "Generating Table")
 
 	done := make(chan bool)
-	go collectResults(results, done, isVerbose, bar, file, chainsNumber)
+	go collectResults(results, done, countChan, isVerbose, bar, file, chainsNumber)
 
 	for i := 0; i < chainsNumber; i++ {
 		jobs <- seed(i, passwordLength, charset)
@@ -143,32 +190,38 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 
 	wg.Wait()
 	close(results)
+	finalCount := <-countChan
 	<-done
+
+	header.NumChains = finalCount
+	file.Seek(0, io.SeekStart)
+	binary.Write(file, binary.BigEndian, header)
 
 	printIfVerbose(isVerbose, "Chains Generated\n")
 	printIfVerbose(isVerbose, "Table saved to %s\n", path)
 }
 
-func collectResults(results <-chan TableEntry, done chan bool, isVerbose bool, bar *progressbar.ProgressBar, file *os.File, chainsNumber int) {
+func collectResults(results <-chan TableEntry, done chan bool, countChan chan uint64, isVerbose bool, bar *progressbar.ProgressBar, file *os.File, chainsNumber int) {
 	endHashes := make(map[[32]byte]struct{}, chainsNumber)
-	collisions := 0
+	uniqueCount := uint64(0)
 	updateBar := 0
 
 	for entry := range results {
-		if _, exists := endHashes[entry.End]; exists {
-			collisions++
-		} else {
+		if _, exists := endHashes[entry.End]; !exists {
 			endHashes[entry.End] = struct{}{}
-			err := binary.Write(file, binary.BigEndian, entry)
-			if err != nil {
-				log.Fatal(err)
-			}
+
+			file.Write(entry.Start)
+			file.Write(entry.End[:])
+
+			uniqueCount++
 		}
 		if updateBar%1000 == 0 {
 			bar.Add(1000)
 		}
 		updateBar++
 	}
-	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", collisions)
+	printIfVerbose(isVerbose, "Generation complete. Collisions: %d\n", chainsNumber-int(uniqueCount))
+	countChan <- uniqueCount
+	close(countChan)
 	done <- true
 }

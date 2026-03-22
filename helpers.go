@@ -123,6 +123,23 @@ func loadTableWithHeader(filename string) (FileHeader, string, []TableEntry, err
 	return header, fileCharset, table, nil
 }
 
+func readTableHeader(filename string) (FileHeader, string, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return FileHeader{}, "", err
+	}
+	defer file.Close()
+
+	var header FileHeader
+	binary.Read(file, binary.BigEndian, &header)
+
+	charsetBytes := make([]byte, header.CharsetLength)
+	io.ReadFull(file, charsetBytes)
+	fileCharset := string(charsetBytes)
+
+	return header, fileCharset, nil
+}
+
 func printTable(table []TableEntry) {
 	for _, entry := range table {
 		fmt.Printf("Start : %s End : %s \n", entry.Start, hex.EncodeToString(entry.End[:]))
