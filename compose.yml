@@ -1,0 +1,22 @@
+services:
+  rainbow-gen:
+    build: .
+    container_name: rainbow_generator
+    deploy:
+      resources:
+        limits:
+          cpus: '72'          
+          memory: 200G        
+    
+    volumes:
+      - /mnt/stockage/rainbow_project/tables:/app/workDir/tables
+    
+    tmpfs:
+      - /app/workDir/tables/tmp:size=100G,mode=1777
+    
+    environment:
+      - TERM=xterm-256color   
+      - GOMAXPROCS=64         
+    
+    stdin_open: true
+    tty: true

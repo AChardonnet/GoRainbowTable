@@ -151,7 +151,10 @@ func tui() {
 	dir, _ := os.Getwd()
 	tablesDir := filepath.Join(dir, "tables")
 	for stay {
-		progressBar := mpb.New(mpb.WithAutoRefresh())
+		progressBar := mpb.New(
+			mpb.WithAutoRefresh(),
+			mpb.WithOutput(os.Stderr),
+		)
 		items := []string{"List Tables", "Compute Table", "Compute Multiple Tables", "Search Table", "Settings", "Exit"}
 
 		prompt := promptui.Select{
