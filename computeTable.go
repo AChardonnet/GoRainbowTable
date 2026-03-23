@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -123,7 +124,7 @@ func worker(id int, jobs <-chan string, results chan<- TableEntry, wg *sync.Wait
 	}
 }
 
-func generateTableMultiThread(workerNumber int, chainLength int, passwordLength int, charset string, chainsNumber int, verbose ...bool) (path string) {
+func generateTableMultiThread(workerNumber int, chainLength int, passwordLength int, charset string, chainsNumber int, progressBar *mpb.Progress, tableDisplayName string, verbose ...bool) (path string) {
 	isVerbose := false
 	if len(verbose) > 0 {
 		isVerbose = true
@@ -180,14 +181,12 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 
 	printIfVerbose(isVerbose, "Done \n")
 
-	progressBar := mpb.New(mpb.WithAutoRefresh())
-
 	elapsedDec := decor.Elapsed(decor.ET_STYLE_GO)
 	etaDec := decor.AverageETA(decor.ET_STYLE_GO)
 	bar := progressBar.AddBar(
 		int64(chainsNumber),
 		mpb.PrependDecorators(
-			decor.Name("Generating Table", decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+			decor.Name("Generating Table "+tableDisplayName, decor.WC{C: decor.DindentRight | decor.DextraSpace}),
 			decor.OnComplete(
 				decor.Any(func(st decor.Statistics) string {
 					elapsedStr, _ := elapsedDec.Decor(st)
@@ -223,17 +222,21 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 }
 
 func collectResults(results <-chan TableEntry, done chan bool, isVerbose bool, bar *mpb.Bar, file *os.File, chainsNumber int) {
+	writer := bufio.NewWriterSize(file, 256*1024*1024) //256 MB
+
 	updateBar := 0
 	for entry := range results {
 
-		file.Write([]byte(entry.Start))
-		file.Write(entry.End[:])
+		writer.Write([]byte(entry.Start))
+		writer.Write(entry.End[:])
 
 		if updateBar%1000 == 0 {
 			bar.IncrBy(1000)
 		}
 		updateBar++
 	}
+	writer.Flush()
+
 	bar.IncrBy(updateBar % 1000)
 	done <- true
 }

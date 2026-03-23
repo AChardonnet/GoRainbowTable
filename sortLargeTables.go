@@ -49,8 +49,7 @@ func (h *MergeHeap) Pop() any {
 	return x
 }
 
-func SortLargeTable(inputPath string, chunkSize int) error {
-	progressBar := mpb.New(mpb.WithAutoRefresh())
+func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, tableDisplayName string) error {
 	fileName := filepath.Base(inputPath)
 	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	tmpDir := filepath.Join(filepath.Dir(inputPath), "tmp")
@@ -64,7 +63,7 @@ func SortLargeTable(inputPath string, chunkSize int) error {
 	mainBar := progressBar.AddBar(
 		int64(4*header.NumChains),
 		mpb.PrependDecorators(
-			decor.Name("Sorting Table", decor.WC{C: decor.DindentRight | decor.DextraSpace}), decor.OnComplete(
+			decor.Name("Sorting Table "+tableDisplayName, decor.WC{C: decor.DindentRight | decor.DextraSpace}), decor.OnComplete(
 				decor.Any(func(st decor.Statistics) string {
 					elapsedStr, _ := elapsedDec.Decor(st)
 					etaStr, _ := etaDec.Decor(st)

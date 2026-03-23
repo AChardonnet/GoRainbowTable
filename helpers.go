@@ -285,3 +285,32 @@ func calculateRequiredChains(targetProb float64, chainLen int, passLen int, char
 
 	return uint64(math.Ceil(n))
 }
+
+func estimateDiskUsage(chains uint64, passwordLength int, charset string) (float64, string) {
+	// Calculate file size
+	headerSize := uint64(binary.Size(FileHeader{}))
+	charsetSize := uint64(len(charset))
+
+	// Each entry: passwordLength bytes + 32 bytes (hash)
+	entrySize := uint64(passwordLength + 32)
+	totalEntriesSize := chains * entrySize
+
+	// Padding calculation (8-byte alignment)
+	totalBeforePadding := headerSize + charsetSize
+	paddingSize := (8 - (totalBeforePadding % 8)) % 8
+
+	totalSize := headerSize + charsetSize + paddingSize + totalEntriesSize
+
+	// Convert to human readable format
+	sizeMB := float64(totalSize) / (1024 * 1024)
+	sizeGB := sizeMB / 1024
+
+	var sizeStr string
+	if sizeGB >= 1 {
+		sizeStr = fmt.Sprintf("%.2f GB", sizeGB)
+	} else {
+		sizeStr = fmt.Sprintf("%.2f MB", sizeMB)
+	}
+
+	return sizeMB, sizeStr
+}

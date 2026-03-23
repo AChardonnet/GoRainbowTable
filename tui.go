@@ -15,6 +15,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/manifoldco/promptui"
+	"github.com/vbauerster/mpb/v8"
 )
 
 type Setting struct {
@@ -46,10 +47,11 @@ func setSettingValue(settings []Setting, name string, value interface{}) []Setti
 func tui() {
 	stay := true
 
+	progressBar := mpb.New(mpb.WithAutoRefresh())
 	//default Settings
 	settings := []Setting{
 		{Name: "workerNumber", DisplayName: "Workers", Value: 20, Type: "int"},
-		{Name: "chainLength", DisplayName: "Chain Length", Value: 5000, Type: "int"},
+		{Name: "chainLength", DisplayName: "Chain Length", Value: 10000, Type: "int"},
 		{Name: "passwordLength", DisplayName: "Password Length", Value: 6, Type: "int"},
 		{Name: "chainsNumber", DisplayName: "Chains Number", Value: 10000000, Type: "int"},
 		{Name: "charset", DisplayName: "Charset", Value: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-", Type: "string"},
@@ -83,9 +85,9 @@ func tui() {
 		case 0:
 			printListTables(tablesDir)
 		case 1:
-			computeTable(settings)
+			computeTable(settings, progressBar)
 		case 2:
-			computeMultipleTables(settings)
+			computeMultipleTables(settings, progressBar)
 		case 3:
 			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool))
 		case 4:
@@ -159,7 +161,7 @@ func printListTables(directory string) {
 	w.Flush()
 }
 
-func computeTable(settings []Setting) {
+func computeTable(settings []Setting, progressBar *mpb.Progress) {
 	stay := true
 	for stay {
 		workerNumber := getSettingValue(settings, "workerNumber").(int)
@@ -185,11 +187,16 @@ func computeTable(settings []Setting) {
 				Selected: "{{ . | green }}",
 			},
 		}
-		index, _, _ := prompt.Run()
+		index, _, err := prompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
 		switch index {
 		case 0:
 			var index int
-			path := generateTableMultiThread(workerNumber, chainLength, passwordLength, charset, chainsNumber)
+			tableDisplayName := fmt.Sprintf("PL%d_CL%d_TL%d", passwordLength, chainLength, chainsNumber)
+			path := generateTableMultiThread(workerNumber, chainLength, passwordLength, charset, chainsNumber, progressBar, tableDisplayName)
 			if tableAutoSort {
 				index = 0
 			} else {
@@ -200,11 +207,15 @@ func computeTable(settings []Setting) {
 						Selected: "{{ . | green }}",
 					},
 				}
-				index, _, _ = prompt.Run()
+				index, _, err = prompt.Run()
+				if err != nil {
+					fmt.Printf("Prompt failed %v\n", err)
+					return
+				}
 			}
 			switch index {
 			case 0:
-				SortLargeTable(path, sortingChunkSize)
+				SortLargeTable(path, sortingChunkSize, progressBar, tableDisplayName)
 			case 1:
 				continue
 			}
@@ -221,13 +232,37 @@ func computeTable(settings []Setting) {
 
 }
 
-func computeMultipleTables(settings []Setting) {
+func computeMultipleTables(settings []Setting, progressBar *mpb.Progress) {
+	// Choose configuration mode
+	modePrompt := promptui.Select{
+		Label: "Configuration Mode",
+		Items: []string{"Manual Configuration", "Auto Configuration (by probability)"},
+		Templates: &promptui.SelectTemplates{
+			Selected: "{{ . | green }}",
+		},
+	}
+	modeIndex, _, err := modePrompt.Run()
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	if modeIndex == 0 {
+		// Manual configuration (existing logic)
+		computeMultipleTablesManual(settings, progressBar)
+	} else {
+		// Auto configuration
+		computeMultipleTablesAuto(settings, progressBar)
+	}
+}
+
+func computeMultipleTablesManual(settings []Setting, progressBar *mpb.Progress) {
 	numTablesPrompt := promptui.Prompt{
 		Label: "How many tables do you want to compute?",
 		Validate: func(input string) error {
 			num, err := strconv.Atoi(input)
 			if err != nil {
-				return fmt.Errorf("please enter a valid number")
+				return fmt.Errorf("enter a valid number")
 			}
 			if num < 1 {
 				return fmt.Errorf("must be at least 1")
@@ -239,7 +274,11 @@ func computeMultipleTables(settings []Setting) {
 		},
 	}
 
-	numTablesStr, _ := numTablesPrompt.Run()
+	numTablesStr, err := numTablesPrompt.Run()
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
+	}
 	numTables, _ := strconv.Atoi(numTablesStr)
 
 	type TableConfig struct {
@@ -267,12 +306,16 @@ func computeMultipleTables(settings []Setting) {
 			Validate: func(input string) error {
 				_, err := strconv.Atoi(input)
 				if err != nil {
-					return fmt.Errorf("please enter a valid number")
+					return fmt.Errorf("enter a valid number")
 				}
 				return nil
 			},
 		}
-		passLenStr, _ := passLenPrompt.Run()
+		passLenStr, err := passLenPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
 		passwordLength, _ := strconv.Atoi(passLenStr)
 
 		chainLenPrompt := promptui.Prompt{
@@ -281,12 +324,16 @@ func computeMultipleTables(settings []Setting) {
 			Validate: func(input string) error {
 				_, err := strconv.Atoi(input)
 				if err != nil {
-					return fmt.Errorf("please enter a valid number")
+					return fmt.Errorf("enter a valid number")
 				}
 				return nil
 			},
 		}
-		chainLenStr, _ := chainLenPrompt.Run()
+		chainLenStr, err := chainLenPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
 		chainLength, _ := strconv.Atoi(chainLenStr)
 
 		chainsNumPrompt := promptui.Prompt{
@@ -295,12 +342,16 @@ func computeMultipleTables(settings []Setting) {
 			Validate: func(input string) error {
 				_, err := strconv.Atoi(input)
 				if err != nil {
-					return fmt.Errorf("please enter a valid number")
+					return fmt.Errorf("enter a valid number")
 				}
 				return nil
 			},
 		}
-		chainsNumStr, _ := chainsNumPrompt.Run()
+		chainsNumStr, err := chainsNumPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
 		chainsNumber, _ := strconv.Atoi(chainsNumStr)
 
 		configs[i] = TableConfig{
@@ -323,7 +374,11 @@ func computeMultipleTables(settings []Setting) {
 			Selected: "{{ . | green }}",
 		},
 	}
-	confirmIndex, _, _ := confirmPrompt.Run()
+	confirmIndex, _, err := confirmPrompt.Run()
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
+	}
 	if confirmIndex != 0 {
 		return
 	}
@@ -335,10 +390,8 @@ func computeMultipleTables(settings []Setting) {
 		wg.Add(1)
 		go func(tableIndex int, config TableConfig) {
 			defer wg.Done()
-			fmt.Printf("\n%s Computing Table %d...\n", promptui.Styler(promptui.FGGreen)("[STARTED]"), tableIndex+1)
-			path := generateTableMultiThread(config.workerNumber, config.chainLength, config.passwordLength, baseCharset, config.chainsNumber)
+			path := generateTableMultiThread(config.workerNumber, config.chainLength, config.passwordLength, baseCharset, config.chainsNumber, progressBar, strconv.Itoa(tableIndex+1))
 			paths[tableIndex] = path
-			fmt.Printf("%s Table %d generated: %s\n", promptui.Styler(promptui.FGGreen)("[DONE]"), tableIndex+1, filepath.Base(path))
 		}(i, cfg)
 	}
 
@@ -354,13 +407,17 @@ func computeMultipleTables(settings []Setting) {
 				Selected: "{{ . | green }}",
 			},
 		}
-		sortIndex, _, _ := sortPrompt.Run()
+		sortIndex, _, err := sortPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
 		if sortIndex == 0 {
 			fmt.Println("\n" + promptui.Styler(promptui.FGBold)("Sorting all tables..."))
 			for i, path := range paths {
 				if path != "" {
 					fmt.Printf("Sorting Table %d...\n", i+1)
-					SortLargeTable(path, sortingChunkSize)
+					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
 				}
 			}
 			fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
@@ -370,7 +427,196 @@ func computeMultipleTables(settings []Setting) {
 		for i, path := range paths {
 			if path != "" {
 				fmt.Printf("Sorting Table %d...\n", i+1)
-				SortLargeTable(path, sortingChunkSize)
+				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+			}
+		}
+		fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
+	}
+}
+
+func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
+	type TableConfig struct {
+		workerNumber   int
+		chainLength    int
+		passwordLength int
+		chainsNumber   int
+		estimatedSize  string
+		actualProb     float64
+	}
+	var sortingChunkSize int
+	var tableAutoSort bool
+	var configs []TableConfig
+	var totalSizeMB float64
+	var baseCharset string
+	configuring := true
+	for configuring {
+		// Get target probability
+		configs = nil
+		probPrompt := promptui.Prompt{
+			Label:   "Target Success Probability (0.0-1.0)",
+			Default: "0.8",
+			Validate: func(input string) error {
+				prob, err := strconv.ParseFloat(input, 64)
+				if err != nil {
+					return fmt.Errorf("enter a valid probability between 0.0 and 1.0")
+				}
+				if prob <= 0 || prob > 1.0 {
+					return fmt.Errorf("probability must be between 0.0 and 1.0")
+				}
+				return nil
+			},
+		}
+		probStr, err := probPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+		targetProb, _ := strconv.ParseFloat(probStr, 64)
+
+		// Get password length range
+		rangePrompt := promptui.Prompt{
+			Label:   "Password Length Range (e.g., 1-6)",
+			Default: "1-6",
+			Validate: func(input string) error {
+				parts := strings.Split(input, "-")
+				if len(parts) != 2 {
+					return fmt.Errorf("enter range in format 'min-max'")
+				}
+				min, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+				max, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+				if err1 != nil || err2 != nil {
+					return fmt.Errorf("enter valid numbers")
+				}
+				if min >= max || min < 1 || max > 20 {
+					return fmt.Errorf("min must be < max, and both between 1-20")
+				}
+				return nil
+			},
+		}
+		rangeStr, err := rangePrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+		rangeParts := strings.Split(rangeStr, "-")
+		minLen, _ := strconv.Atoi(strings.TrimSpace(rangeParts[0]))
+		maxLen, _ := strconv.Atoi(strings.TrimSpace(rangeParts[1]))
+
+		// Get base settings
+		baseWorkerNumber := getSettingValue(settings, "workerNumber").(int)
+		baseChainLength := getSettingValue(settings, "chainLength").(int)
+		baseCharset = getSettingValue(settings, "charset").(string)
+		sortingChunkSize = getSettingValue(settings, "sortingChunkSize").(int)
+		tableAutoSort = getSettingValue(settings, "tableAutoSort").(bool)
+
+		fmt.Println("\n" + promptui.Styler(promptui.FGBold)("--- Auto Configuration Preview ---"))
+		fmt.Printf("Target Probability: %.1f%%\n", targetProb*100)
+		fmt.Printf("Password Length Range: %d-%d\n", minLen, maxLen)
+		fmt.Printf("Chain Length : %d\n\n", baseChainLength)
+
+		for passLen := minLen; passLen <= maxLen; passLen++ {
+			// Calculate required chains for target probability
+			requiredChains := calculateRequiredChains(targetProb, baseChainLength, passLen, baseCharset)
+
+			// Estimate disk usage
+			sizeMB, sizeStr := estimateDiskUsage(requiredChains, passLen, baseCharset)
+			totalSizeMB += sizeMB
+
+			// Calculate actual probability
+			actualProb := calculateSuccessProbability(int(requiredChains), baseChainLength, passLen, baseCharset)
+
+			config := TableConfig{
+				workerNumber:   baseWorkerNumber,
+				chainLength:    baseChainLength,
+				passwordLength: passLen,
+				chainsNumber:   int(requiredChains),
+				estimatedSize:  sizeStr,
+				actualProb:     actualProb,
+			}
+			configs = append(configs, config)
+
+			fmt.Printf("Password Length %d: %d chains, %.2f%% success, %s\n",
+				passLen, requiredChains, actualProb*100, sizeStr)
+		}
+
+		// Show total estimated size
+		totalSizeGB := totalSizeMB / 1024
+		var totalSizeStr string
+		if totalSizeGB >= 1 {
+			totalSizeStr = fmt.Sprintf("%.2f GB", totalSizeGB)
+		} else {
+			totalSizeStr = fmt.Sprintf("%.2f MB", totalSizeMB)
+		}
+		fmt.Printf("\n%s Total Estimated Size: %s\n", promptui.Styler(promptui.FGYellow)("→"), totalSizeStr)
+
+		// Ask user to adjust chain length if needed
+		adjustPrompt := promptui.Select{
+			Label: "Adjust chain length for all tables?",
+			Items: []string{"Keep current", "Change Settings"},
+			Templates: &promptui.SelectTemplates{
+				Selected: "{{ . | green }}",
+			},
+		}
+		adjustIndex, _, err := adjustPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+
+		if adjustIndex == 0 {
+			configuring = false
+		}
+	}
+
+	// Start concurrent computation
+	numTables := len(configs)
+	var wg sync.WaitGroup
+	paths := make([]string, numTables)
+
+	fmt.Println("\n" + promptui.Styler(promptui.FGBold)("--- Starting Auto Table Computation ---"))
+
+	for i, cfg := range configs {
+		wg.Add(1)
+		go func(tableIndex int, config TableConfig) {
+			defer wg.Done()
+			path := generateTableMultiThread(config.workerNumber, config.chainLength, config.passwordLength, baseCharset, config.chainsNumber, progressBar, strconv.Itoa(i+1))
+			paths[tableIndex] = path
+		}(i, cfg)
+	}
+
+	// Wait for all computations to complete
+	wg.Wait()
+
+	fmt.Println("\n" + promptui.Styler(promptui.FGBold, promptui.FGGreen)("All tables generated successfully!"))
+
+	// Ask if user wants to sort the tables
+	if !tableAutoSort {
+		sortPrompt := promptui.Select{
+			Label: "Sort all tables?",
+			Items: []string{"Yes", "No"},
+			Templates: &promptui.SelectTemplates{
+				Selected: "{{ . | green }}",
+			},
+		}
+		sortIndex, _, err := sortPrompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+		if sortIndex == 0 {
+			fmt.Println("\n" + promptui.Styler(promptui.FGBold)("Sorting all tables..."))
+			for i, path := range paths {
+				if path != "" {
+					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+				}
+			}
+			fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
+		}
+	} else {
+		fmt.Println("\n" + promptui.Styler(promptui.FGBold)("Sorting all tables..."))
+		for i, path := range paths {
+			if path != "" {
+				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
 			}
 		}
 		fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
@@ -432,7 +678,7 @@ func updateSetting(settings []Setting, index int) ([]Setting, error) {
 			case "int":
 				_, err := strconv.Atoi(input)
 				if err != nil {
-					return fmt.Errorf("please enter a valid number")
+					return fmt.Errorf("enter a valid number")
 				}
 			case "string":
 				if len(input) == 0 {
@@ -441,7 +687,7 @@ func updateSetting(settings []Setting, index int) ([]Setting, error) {
 			case "bool":
 				lower := strings.ToLower(input)
 				if lower != "true" && lower != "false" && lower != "yes" && lower != "no" {
-					return fmt.Errorf("please enter true, false, yes, or no")
+					return fmt.Errorf("enter true, false, yes, or no")
 				}
 			}
 			return nil
@@ -494,7 +740,7 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 		// Adjust the length {32,64} based on the hash type you expect
 		match, _ := regexp.MatchString("^[a-fA-F0-9]+$", input)
 		if !match {
-			return errors.New("invalid format: please enter a hex hash")
+			return errors.New("invalid format: enter a hex hash")
 		} else {
 			if len(input) != 64 {
 				return errors.New("must be 64 characters")
@@ -514,7 +760,7 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 	validateNumber := func(input string) error {
 		_, err := strconv.Atoi(input)
 		if err != nil {
-			return errors.New("please enter a valid number")
+			return errors.New("enter a valid number")
 		}
 		return nil
 	}
@@ -603,7 +849,11 @@ func selectTable(directory string, passwordLength int, sorted int, autoSelect bo
 			Size:  10,
 		}
 
-		_, result, _ := prompt.Run()
+		_, result, err := prompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
 		path, _ := filepath.Rel(wDir, filepath.Join(directory, result))
 		return path, true
 	}
