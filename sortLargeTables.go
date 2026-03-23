@@ -284,7 +284,6 @@ func mergeChunks(header FileHeader, charset string, tempPaths []string, mainBar 
 			log.Fatal(err)
 		}
 	}
-	progressBar.Wait()
 	return nil
 }
 

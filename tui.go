@@ -64,6 +64,7 @@ func tui() {
 	dir, _ := os.Getwd()
 	tablesDir := filepath.Join(dir, "tables")
 	for stay {
+		progressBar := mpb.New(mpb.WithAutoRefresh())
 		items := []string{"List Tables", "Compute Table", "Compute Multiple Tables", "Search Table", "Settings", "Exit"}
 
 		prompt := promptui.Select{
@@ -99,6 +100,7 @@ func tui() {
 		case 5:
 			stay = false
 		}
+		progressBar.Wait()
 	}
 }
 
@@ -248,10 +250,8 @@ func computeMultipleTables(settings []Setting, progressBar *mpb.Progress) {
 	}
 
 	if modeIndex == 0 {
-		// Manual configuration (existing logic)
 		computeMultipleTablesManual(settings, progressBar)
 	} else {
-		// Auto configuration
 		computeMultipleTablesAuto(settings, progressBar)
 	}
 }
@@ -515,14 +515,11 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 		fmt.Printf("Chain Length : %d\n\n", baseChainLength)
 
 		for passLen := minLen; passLen <= maxLen; passLen++ {
-			// Calculate required chains for target probability
 			requiredChains := calculateRequiredChains(targetProb, baseChainLength, passLen, baseCharset)
 
-			// Estimate disk usage
 			sizeMB, sizeStr := estimateDiskUsage(requiredChains, passLen, baseCharset)
 			totalSizeMB += sizeMB
 
-			// Calculate actual probability
 			actualProb := calculateSuccessProbability(int(requiredChains), baseChainLength, passLen, baseCharset)
 
 			config := TableConfig{
