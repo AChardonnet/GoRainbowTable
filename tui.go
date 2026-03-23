@@ -463,6 +463,7 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 		}
 		switch index {
 		case 0:
+			stay = false
 			var index int
 			tableDisplayName := fmt.Sprintf("PL%d_CL%d_TL%d", passwordLength, chainLength, chainsNumber)
 			path := generateTableMultiThread(workerNumber, chainLength, passwordLength, charset, chainsNumber, progressBar, tableDisplayName)
