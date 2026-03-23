@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,15 +30,16 @@ type Setting struct {
 }
 
 type SettingsData struct {
-	WorkerNumber      int    `json:"workerNumber"`
-	ChainLength       int    `json:"chainLength"`
-	PasswordLength    int    `json:"passwordLength"`
-	ChainsNumber      int    `json:"chainsNumber"`
-	Charset           string `json:"charset"`
-	TableAutoSelect   bool   `json:"tableAutoSelect"`
-	TableAutoSort     bool   `json:"tableAutoSort"`
-	TableAutoGenerate bool   `json:"tableAutoGenerate"`
-	SortingChunkSize  int    `json:"sortingChunkSize"`
+	WorkerNumber             int    `json:"workerNumber"`
+	ChainLength              int    `json:"chainLength"`
+	PasswordLength           int    `json:"passwordLength"`
+	ChainsNumber             int    `json:"chainsNumber"`
+	Charset                  string `json:"charset"`
+	TableAutoSelect          bool   `json:"tableAutoSelect"`
+	TableAutoSort            bool   `json:"tableAutoSort"`
+	AutoRemoveUnsortedTables bool   `json:"autoRemoveUnsortedTables"`
+	TableAutoGenerate        bool   `json:"tableAutoGenerate"`
+	SortingChunkSize         int    `json:"sortingChunkSize"`
 }
 
 func getSettingValue(settings []Setting, name string) interface{} {
@@ -60,15 +63,16 @@ func setSettingValue(settings []Setting, name string, value interface{}) []Setti
 
 func settingsToData(settings []Setting) SettingsData {
 	return SettingsData{
-		WorkerNumber:      getSettingValue(settings, "workerNumber").(int),
-		ChainLength:       getSettingValue(settings, "chainLength").(int),
-		PasswordLength:    getSettingValue(settings, "passwordLength").(int),
-		ChainsNumber:      getSettingValue(settings, "chainsNumber").(int),
-		Charset:           getSettingValue(settings, "charset").(string),
-		TableAutoSelect:   getSettingValue(settings, "tableAutoSelect").(bool),
-		TableAutoSort:     getSettingValue(settings, "tableAutoSort").(bool),
-		TableAutoGenerate: getSettingValue(settings, "tableAutoGenerate").(bool),
-		SortingChunkSize:  getSettingValue(settings, "sortingChunkSize").(int),
+		WorkerNumber:             getSettingValue(settings, "workerNumber").(int),
+		ChainLength:              getSettingValue(settings, "chainLength").(int),
+		PasswordLength:           getSettingValue(settings, "passwordLength").(int),
+		ChainsNumber:             getSettingValue(settings, "chainsNumber").(int),
+		Charset:                  getSettingValue(settings, "charset").(string),
+		TableAutoSelect:          getSettingValue(settings, "tableAutoSelect").(bool),
+		TableAutoSort:            getSettingValue(settings, "tableAutoSort").(bool),
+		AutoRemoveUnsortedTables: getSettingValue(settings, "autoRemoveUnsortedTables").(bool),
+		TableAutoGenerate:        getSettingValue(settings, "tableAutoGenerate").(bool),
+		SortingChunkSize:         getSettingValue(settings, "sortingChunkSize").(int),
 	}
 }
 
@@ -81,6 +85,7 @@ func dataToSettings(data SettingsData) []Setting {
 		{Name: "charset", DisplayName: "Charset", Value: data.Charset, Type: "string"},
 		{Name: "tableAutoSelect", DisplayName: "Table Auto Select", Value: data.TableAutoSelect, Type: "bool"},
 		{Name: "tableAutoSort", DisplayName: "Table Auto Sort", Value: data.TableAutoSort, Type: "bool"},
+		{Name: "autoRemoveUnsortedTables", DisplayName: "Auto Remove Unsorted Tables", Value: data.AutoRemoveUnsortedTables, Type: "bool"},
 		{Name: "tableAutoGenerate", DisplayName: "Table Auto Generate", Value: data.TableAutoGenerate, Type: "bool"},
 		{Name: "sortingChunkSize", DisplayName: "Sorting Chunk Size", Value: data.SortingChunkSize, Type: "int"},
 	}
@@ -135,6 +140,7 @@ func getDefaultSettings() []Setting {
 		{Name: "charset", DisplayName: "Charset", Value: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-", Type: "string"},
 		{Name: "tableAutoSelect", DisplayName: "Table Auto Select", Value: true, Type: "bool"},
 		{Name: "tableAutoSort", DisplayName: "Table Auto Sort", Value: true, Type: "bool"},
+		{Name: "autoRemoveUnsortedTables", DisplayName: "Auto Remove Unsorted Tables", Value: false, Type: "bool"},
 		{Name: "tableAutoGenerate", DisplayName: "Table Auto Generate", Value: true, Type: "bool"},
 		{Name: "sortingChunkSize", DisplayName: "Sorting Chunk Size", Value: 2000000, Type: "int"},
 	}
@@ -156,7 +162,7 @@ func tui() {
 			mpb.WithAutoRefresh(),
 			mpb.WithOutput(os.Stderr),
 		)
-		items := []string{"List Tables", "Compute Table", "Compute Multiple Tables", "Search Table", "Settings", "Exit"}
+		items := []string{"List Tables", "Compute Table", "Compute Multiple Tables", "Search Table", "PruneTable", "Settings", "Exit"}
 
 		prompt := promptui.Select{
 			Label: "Select Action",
@@ -164,6 +170,7 @@ func tui() {
 			Templates: &promptui.SelectTemplates{
 				Selected: "{{ . | green }}",
 			},
+			Size: 7,
 		}
 
 		index, _, err := prompt.Run()
@@ -183,25 +190,169 @@ func tui() {
 		case 3:
 			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool))
 		case 4:
+			pruneTablesMenu(tablesDir)
+		case 5:
 			var err error
 			settings, err = settingsMenu(settings)
 			if err != nil {
 				fmt.Printf("Settings menu error: %v\n", err)
 			}
-		case 5:
+		case 6:
 			stay = false
 		}
 		progressBar.Wait()
 	}
 }
 
-func listTables(directory string, filterSorted int, filterPassLen int) ([]string, error) {
+func pruneTablesMenu(directory string) {
+	stay := true
+	for stay {
+		prompt := promptui.Select{
+			Label: "PruneTable",
+			Items: []string{"Remove unsorted tables", "Remove duplicate tables", "Back"},
+			Templates: &promptui.SelectTemplates{
+				Selected: "{{ . | green }}",
+			},
+			Size: 3,
+		}
+
+		index, _, err := prompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+
+		switch index {
+		case 0:
+			removed, err := removeUnsortedTables(directory)
+			if err != nil {
+				fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Failed to remove unsorted tables: %v", err)))
+				continue
+			}
+			fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Removed %d unsorted tables", removed)))
+		case 1:
+			removed, err := removeDuplicateTables(directory)
+			if err != nil {
+				fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Failed to remove duplicate tables: %v", err)))
+				continue
+			}
+			fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Removed %d duplicate tables", removed)))
+		case 2:
+			stay = false
+		}
+	}
+}
+
+func removeUnsortedTables(directory string) (int, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	removed := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		path := filepath.Join(directory, entry.Name())
+		header, _, err := readTableHeader(path)
+		if err != nil {
+			continue
+		}
+
+		if string(header.Magic[:4]) != "RBOW" {
+			continue
+		}
+
+		if header.IsSorted == 0 {
+			if err := os.Remove(path); err != nil {
+				return removed, fmt.Errorf("failed to remove %s: %w", path, err)
+			}
+			removed++
+		}
+	}
+
+	return removed, nil
+}
+
+func removeDuplicateTables(directory string) (int, error) {
+	type tableMeta struct {
+		name           string
+		path           string
+		passwordLength uint32
+		probability    float64
+	}
+
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	groups := make(map[uint32][]tableMeta)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		path := filepath.Join(directory, entry.Name())
+		header, charset, err := readTableHeader(path)
+		if err != nil {
+			continue
+		}
+		if string(header.Magic[:4]) != "RBOW" {
+			continue
+		}
+		if header.IsSorted == 0 {
+			continue
+		}
+
+		probability := calculateSuccessProbability(int(header.NumChains), int(header.ChainLength), int(header.PasswordLength), charset)
+		meta := tableMeta{
+			name:           entry.Name(),
+			path:           path,
+			passwordLength: header.PasswordLength,
+			probability:    probability,
+		}
+		groups[header.PasswordLength] = append(groups[header.PasswordLength], meta)
+	}
+
+	removed := 0
+	for _, group := range groups {
+		if len(group) <= 1 {
+			continue
+		}
+
+		sort.Slice(group, func(i, j int) bool {
+			if group[i].probability == group[j].probability {
+				return group[i].name < group[j].name
+			}
+			return group[i].probability > group[j].probability
+		})
+
+		for i := 1; i < len(group); i++ {
+			if err := os.Remove(group[i].path); err != nil {
+				return removed, fmt.Errorf("failed to remove duplicate %s: %w", group[i].path, err)
+			}
+			removed++
+		}
+	}
+
+	return removed, nil
+}
+
+func listTables(directory string, filterSorted int, filterPassLen int, sorted bool) ([]string, error) {
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
 
-	var tables []string
+	type tableCandidate struct {
+		name        string
+		probability float64
+	}
+
+	var tables []tableCandidate
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -215,11 +366,17 @@ func listTables(directory string, filterSorted int, filterPassLen int) ([]string
 
 		var header FileHeader
 		err = binary.Read(file, binary.BigEndian, &header)
-		file.Close()
-
 		if err != nil {
+			file.Close()
 			continue
 		}
+
+		charsetBytes := make([]byte, header.CharsetLength)
+		if _, err := io.ReadFull(file, charsetBytes); err != nil {
+			file.Close()
+			continue
+		}
+		file.Close()
 
 		if string(header.Magic[:4]) != "RBOW" {
 			continue
@@ -234,13 +391,31 @@ func listTables(directory string, filterSorted int, filterPassLen int) ([]string
 				continue
 			}
 		}
-		tables = append(tables, entry.Name())
+
+		charset := string(charsetBytes)
+		probability := calculateSuccessProbability(int(header.NumChains), int(header.ChainLength), int(header.PasswordLength), charset)
+		if header.IsSorted == 0 {
+			probability = 0
+		}
+		tables = append(tables, tableCandidate{name: entry.Name(), probability: probability})
 	}
-	return tables, nil
+
+	if sorted {
+		sort.Slice(tables, func(i, j int) bool {
+			return tables[i].probability > tables[j].probability
+		})
+	}
+
+	result := make([]string, 0, len(tables))
+	for _, table := range tables {
+		result = append(result, table.name)
+	}
+
+	return result, nil
 }
 
 func printListTables(directory string) {
-	tables, _ := listTables(directory, -1, -1)
+	tables, _ := listTables(directory, -1, -1, false)
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 	fmt.Fprintln(w, "N\tNAME\tVERSION\tPASSWORD_LENGTH\tCHAIN_LENGTH\tCHAIN_COUNT\tCHARSET\tSORTED")
 	for i, table := range tables {
@@ -264,6 +439,7 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 		chainsNumber := getSettingValue(settings, "chainsNumber").(int)
 		sortingChunkSize := getSettingValue(settings, "sortingChunkSize").(int)
 		tableAutoSort := getSettingValue(settings, "tableAutoSort").(bool)
+		autoRemoveUnsortedTables := getSettingValue(settings, "autoRemoveUnsortedTables").(bool)
 
 		fmt.Println(promptui.Styler(promptui.FGBold)("\n--- Rainbow Table Configuration ---"))
 		fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Workers:"), workerNumber)
@@ -309,6 +485,16 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 			switch index {
 			case 0:
 				SortLargeTable(path, sortingChunkSize, progressBar, tableDisplayName)
+				if autoRemoveUnsortedTables {
+					dir, _ := os.Getwd()
+					tablesDir := filepath.Join(dir, "tables")
+					removed, err := removeUnsortedTables(tablesDir)
+					if err != nil {
+						fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Auto remove unsorted tables failed: %v", err)))
+					} else if removed > 0 {
+						fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
+					}
+				}
 			case 1:
 				continue
 			}
@@ -387,6 +573,7 @@ func computeMultipleTablesManual(settings []Setting, progressBar *mpb.Progress) 
 	baseChainsNumber := getSettingValue(settings, "chainsNumber").(int)
 	sortingChunkSize := getSettingValue(settings, "sortingChunkSize").(int)
 	tableAutoSort := getSettingValue(settings, "tableAutoSort").(bool)
+	autoRemoveUnsortedTables := getSettingValue(settings, "autoRemoveUnsortedTables").(bool)
 
 	for i := 0; i < numTables; i++ {
 		fmt.Printf("\n%s--- Table %d Configuration ---\n", promptui.Styler(promptui.FGBold)(""), i+1)
@@ -511,6 +698,16 @@ func computeMultipleTablesManual(settings []Setting, progressBar *mpb.Progress) 
 					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
 				}
 			}
+			if autoRemoveUnsortedTables {
+				dir, _ := os.Getwd()
+				tablesDir := filepath.Join(dir, "tables")
+				removed, err := removeUnsortedTables(tablesDir)
+				if err != nil {
+					fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Auto remove unsorted tables failed: %v", err)))
+				} else if removed > 0 {
+					fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
+				}
+			}
 			fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
 		}
 	} else {
@@ -519,6 +716,16 @@ func computeMultipleTablesManual(settings []Setting, progressBar *mpb.Progress) 
 			if path != "" {
 				fmt.Printf("Sorting Table %d...\n", i+1)
 				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+			}
+		}
+		if autoRemoveUnsortedTables {
+			dir, _ := os.Getwd()
+			tablesDir := filepath.Join(dir, "tables")
+			removed, err := removeUnsortedTables(tablesDir)
+			if err != nil {
+				fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Auto remove unsorted tables failed: %v", err)))
+			} else if removed > 0 {
+				fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
 			}
 		}
 		fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
@@ -536,6 +743,7 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 	}
 	var sortingChunkSize int
 	var tableAutoSort bool
+	var autoRemoveUnsortedTables bool
 	var configs []TableConfig
 	var totalSizeMB float64
 	var baseCharset string
@@ -599,6 +807,7 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 		baseCharset = getSettingValue(settings, "charset").(string)
 		sortingChunkSize = getSettingValue(settings, "sortingChunkSize").(int)
 		tableAutoSort = getSettingValue(settings, "tableAutoSort").(bool)
+		autoRemoveUnsortedTables = getSettingValue(settings, "autoRemoveUnsortedTables").(bool)
 
 		fmt.Println("\n" + promptui.Styler(promptui.FGBold)("--- Auto Configuration Preview ---"))
 		fmt.Printf("Target Probability: %.1f%%\n", targetProb*100)
@@ -703,6 +912,16 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
 				}
 			}
+			if autoRemoveUnsortedTables {
+				dir, _ := os.Getwd()
+				tablesDir := filepath.Join(dir, "tables")
+				removed, err := removeUnsortedTables(tablesDir)
+				if err != nil {
+					fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Auto remove unsorted tables failed: %v", err)))
+				} else if removed > 0 {
+					fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
+				}
+			}
 			fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
 		}
 	} else {
@@ -710,6 +929,16 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 		for i, path := range paths {
 			if path != "" {
 				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+			}
+		}
+		if autoRemoveUnsortedTables {
+			dir, _ := os.Getwd()
+			tablesDir := filepath.Join(dir, "tables")
+			removed, err := removeUnsortedTables(tablesDir)
+			if err != nil {
+				fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Auto remove unsorted tables failed: %v", err)))
+			} else if removed > 0 {
+				fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
 			}
 		}
 		fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
@@ -825,7 +1054,7 @@ func searchPasswordKnownLength(targetHash [32]byte, tablePath string, workerNumb
 	password, found := searchTableParallel(targetHash, table, workerNumber, int(header.ChainLength), int(header.PasswordLength), charset)
 
 	if found {
-		fmt.Printf("  %s %s\n", promptui.Styler(promptui.FGGreen)("Password Found"), password)
+		fmt.Printf(" %s %s\n", promptui.Styler(promptui.FGGreen)("Password Found"), password)
 	} else {
 		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)("Password Not Found"))
 	}
@@ -834,8 +1063,6 @@ func searchPasswordKnownLength(targetHash [32]byte, tablePath string, workerNumb
 
 func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 	validate := func(input string) error {
-		// This regex checks if it's a hex string (0-9, a-f)
-		// Adjust the length {32,64} based on the hash type you expect
 		match, _ := regexp.MatchString("^[a-fA-F0-9]+$", input)
 		if !match {
 			return errors.New("invalid format: enter a hex hash")
@@ -915,9 +1142,10 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 			fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)("No Table found for password Length"))
 		}
 	case 1:
-		for i := 1; i < 6; i++ {
+		for i := 1; i < 21; i++ {
 			availableTables, _ := selectTable(tablesDir, i, 1, tableAutoSelect)
 			if len(availableTables) > 0 {
+				fmt.Printf(" %s\n", promptui.Styler(promptui.FGBlue)(fmt.Sprintf("Searching for length %d", i)))
 				_, found := searchPasswordKnownLength([32]byte(hash), availableTables, workerNumber)
 				if found {
 					break
@@ -928,7 +1156,7 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 }
 
 func selectTable(directory string, passwordLength int, sorted int, autoSelect bool) (path string, found bool) {
-	tables, _ := listTables(directory, sorted, passwordLength)
+	tables, _ := listTables(directory, sorted, passwordLength, true)
 
 	if len(tables) == 0 {
 		fmt.Printf(" %s\n", promptui.Styler(promptui.FGBold, promptui.FGRed)(fmt.Sprintf("No matching tables found (Sorted Filter: %d, PassLen Filter: %d)", sorted, passwordLength)))
@@ -937,7 +1165,6 @@ func selectTable(directory string, passwordLength int, sorted int, autoSelect bo
 
 	wDir, _ := os.Getwd()
 	if autoSelect {
-		fmt.Println(tables)
 		path, _ := filepath.Rel(wDir, filepath.Join(directory, tables[0]))
 		return path, true
 	} else {
