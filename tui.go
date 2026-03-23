@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -25,6 +26,18 @@ type Setting struct {
 	Type        string // "int", "string", "bool"
 }
 
+type SettingsData struct {
+	WorkerNumber      int    `json:"workerNumber"`
+	ChainLength       int    `json:"chainLength"`
+	PasswordLength    int    `json:"passwordLength"`
+	ChainsNumber      int    `json:"chainsNumber"`
+	Charset           string `json:"charset"`
+	TableAutoSelect   bool   `json:"tableAutoSelect"`
+	TableAutoSort     bool   `json:"tableAutoSort"`
+	TableAutoGenerate bool   `json:"tableAutoGenerate"`
+	SortingChunkSize  int    `json:"sortingChunkSize"`
+}
+
 func getSettingValue(settings []Setting, name string) interface{} {
 	for _, s := range settings {
 		if s.Name == name {
@@ -44,12 +57,76 @@ func setSettingValue(settings []Setting, name string, value interface{}) []Setti
 	return settings
 }
 
-func tui() {
-	stay := true
+func settingsToData(settings []Setting) SettingsData {
+	return SettingsData{
+		WorkerNumber:      getSettingValue(settings, "workerNumber").(int),
+		ChainLength:       getSettingValue(settings, "chainLength").(int),
+		PasswordLength:    getSettingValue(settings, "passwordLength").(int),
+		ChainsNumber:      getSettingValue(settings, "chainsNumber").(int),
+		Charset:           getSettingValue(settings, "charset").(string),
+		TableAutoSelect:   getSettingValue(settings, "tableAutoSelect").(bool),
+		TableAutoSort:     getSettingValue(settings, "tableAutoSort").(bool),
+		TableAutoGenerate: getSettingValue(settings, "tableAutoGenerate").(bool),
+		SortingChunkSize:  getSettingValue(settings, "sortingChunkSize").(int),
+	}
+}
 
-	progressBar := mpb.New(mpb.WithAutoRefresh())
-	//default Settings
-	settings := []Setting{
+func dataToSettings(data SettingsData) []Setting {
+	return []Setting{
+		{Name: "workerNumber", DisplayName: "Workers", Value: data.WorkerNumber, Type: "int"},
+		{Name: "chainLength", DisplayName: "Chain Length", Value: data.ChainLength, Type: "int"},
+		{Name: "passwordLength", DisplayName: "Password Length", Value: data.PasswordLength, Type: "int"},
+		{Name: "chainsNumber", DisplayName: "Chains Number", Value: data.ChainsNumber, Type: "int"},
+		{Name: "charset", DisplayName: "Charset", Value: data.Charset, Type: "string"},
+		{Name: "tableAutoSelect", DisplayName: "Table Auto Select", Value: data.TableAutoSelect, Type: "bool"},
+		{Name: "tableAutoSort", DisplayName: "Table Auto Sort", Value: data.TableAutoSort, Type: "bool"},
+		{Name: "tableAutoGenerate", DisplayName: "Table Auto Generate", Value: data.TableAutoGenerate, Type: "bool"},
+		{Name: "sortingChunkSize", DisplayName: "Sorting Chunk Size", Value: data.SortingChunkSize, Type: "int"},
+	}
+}
+
+func saveSettings(settings []Setting) error {
+	data := settingsToData(settings)
+
+	file, err := os.Create("settings.json")
+	if err != nil {
+		return fmt.Errorf("failed to create settings file: %w", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+
+	if err := encoder.Encode(data); err != nil {
+		return fmt.Errorf("failed to encode settings: %w", err)
+	}
+
+	return nil
+}
+
+func loadSettings() ([]Setting, error) {
+	file, err := os.Open("settings.json")
+	if err != nil {
+		// If file doesn't exist, return default settings
+		if os.IsNotExist(err) {
+			return getDefaultSettings(), nil
+		}
+		return nil, fmt.Errorf("failed to open settings file: %w", err)
+	}
+	defer file.Close()
+
+	var data SettingsData
+	decoder := json.NewDecoder(file)
+
+	if err := decoder.Decode(&data); err != nil {
+		return nil, fmt.Errorf("failed to decode settings: %w", err)
+	}
+
+	return dataToSettings(data), nil
+}
+
+func getDefaultSettings() []Setting {
+	return []Setting{
 		{Name: "workerNumber", DisplayName: "Workers", Value: 20, Type: "int"},
 		{Name: "chainLength", DisplayName: "Chain Length", Value: 10000, Type: "int"},
 		{Name: "passwordLength", DisplayName: "Password Length", Value: 6, Type: "int"},
@@ -59,6 +136,16 @@ func tui() {
 		{Name: "tableAutoSort", DisplayName: "Table Auto Sort", Value: true, Type: "bool"},
 		{Name: "tableAutoGenerate", DisplayName: "Table Auto Generate", Value: true, Type: "bool"},
 		{Name: "sortingChunkSize", DisplayName: "Sorting Chunk Size", Value: 2000000, Type: "int"},
+	}
+}
+
+func tui() {
+	stay := true
+	//default Settings
+	settings, err := loadSettings()
+	if err != nil {
+		fmt.Printf("Warning: Failed to load settings, using defaults: %v\n", err)
+		settings = getDefaultSettings()
 	}
 
 	dir, _ := os.Getwd()
@@ -660,6 +747,11 @@ func settingsMenu(settings []Setting) ([]Setting, error) {
 		settings, err = updateSetting(settings, index)
 		if err != nil {
 			return settings, err
+		}
+
+		// Save settings to file
+		if err := saveSettings(settings); err != nil {
+			fmt.Printf("Warning: Failed to save settings: %v\n", err)
 		}
 	}
 	return settings, nil
