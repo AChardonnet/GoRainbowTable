@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/manifoldco/promptui"
@@ -61,7 +62,7 @@ func tui() {
 	dir, _ := os.Getwd()
 	tablesDir := filepath.Join(dir, "tables")
 	for stay {
-		items := []string{"List Tables", "Compute Table", "Search Table", "Settings", "Exit"}
+		items := []string{"List Tables", "Compute Table", "Compute Multiple Tables", "Search Table", "Settings", "Exit"}
 
 		prompt := promptui.Select{
 			Label: "Select Action",
@@ -84,14 +85,16 @@ func tui() {
 		case 1:
 			computeTable(settings)
 		case 2:
-			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool))
+			computeMultipleTables(settings)
 		case 3:
+			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool))
+		case 4:
 			var err error
 			settings, err = settingsMenu(settings)
 			if err != nil {
 				fmt.Printf("Settings menu error: %v\n", err)
 			}
-		case 4:
+		case 5:
 			stay = false
 		}
 	}
@@ -218,9 +221,164 @@ func computeTable(settings []Setting) {
 
 }
 
+func computeMultipleTables(settings []Setting) {
+	numTablesPrompt := promptui.Prompt{
+		Label: "How many tables do you want to compute?",
+		Validate: func(input string) error {
+			num, err := strconv.Atoi(input)
+			if err != nil {
+				return fmt.Errorf("please enter a valid number")
+			}
+			if num < 1 {
+				return fmt.Errorf("must be at least 1")
+			}
+			if num > 10 {
+				return fmt.Errorf("maximum 10 tables at once for system stability")
+			}
+			return nil
+		},
+	}
+
+	numTablesStr, _ := numTablesPrompt.Run()
+	numTables, _ := strconv.Atoi(numTablesStr)
+
+	type TableConfig struct {
+		workerNumber   int
+		chainLength    int
+		passwordLength int
+		chainsNumber   int
+	}
+
+	configs := make([]TableConfig, numTables)
+	baseWorkerNumber := getSettingValue(settings, "workerNumber").(int)
+	baseChainLength := getSettingValue(settings, "chainLength").(int)
+	basePasswordLength := getSettingValue(settings, "passwordLength").(int)
+	baseCharset := getSettingValue(settings, "charset").(string)
+	baseChainsNumber := getSettingValue(settings, "chainsNumber").(int)
+	sortingChunkSize := getSettingValue(settings, "sortingChunkSize").(int)
+	tableAutoSort := getSettingValue(settings, "tableAutoSort").(bool)
+
+	for i := 0; i < numTables; i++ {
+		fmt.Printf("\n%s--- Table %d Configuration ---\n", promptui.Styler(promptui.FGBold)(""), i+1)
+
+		passLenPrompt := promptui.Prompt{
+			Label:   "Password Length",
+			Default: fmt.Sprintf("%d", basePasswordLength),
+			Validate: func(input string) error {
+				_, err := strconv.Atoi(input)
+				if err != nil {
+					return fmt.Errorf("please enter a valid number")
+				}
+				return nil
+			},
+		}
+		passLenStr, _ := passLenPrompt.Run()
+		passwordLength, _ := strconv.Atoi(passLenStr)
+
+		chainLenPrompt := promptui.Prompt{
+			Label:   "Chain Length",
+			Default: fmt.Sprintf("%d", baseChainLength),
+			Validate: func(input string) error {
+				_, err := strconv.Atoi(input)
+				if err != nil {
+					return fmt.Errorf("please enter a valid number")
+				}
+				return nil
+			},
+		}
+		chainLenStr, _ := chainLenPrompt.Run()
+		chainLength, _ := strconv.Atoi(chainLenStr)
+
+		chainsNumPrompt := promptui.Prompt{
+			Label:   "Chains Number",
+			Default: fmt.Sprintf("%d", baseChainsNumber),
+			Validate: func(input string) error {
+				_, err := strconv.Atoi(input)
+				if err != nil {
+					return fmt.Errorf("please enter a valid number")
+				}
+				return nil
+			},
+		}
+		chainsNumStr, _ := chainsNumPrompt.Run()
+		chainsNumber, _ := strconv.Atoi(chainsNumStr)
+
+		configs[i] = TableConfig{
+			workerNumber:   baseWorkerNumber,
+			chainLength:    chainLength,
+			passwordLength: passwordLength,
+			chainsNumber:   chainsNumber,
+		}
+	}
+
+	fmt.Println("\n" + promptui.Styler(promptui.FGBold)("--- Starting Multiple Table Computation ---"))
+	for i, cfg := range configs {
+		fmt.Printf("Table %d: %d chains, %d password length, %d chain length\n", i+1, cfg.chainsNumber, cfg.passwordLength, cfg.chainLength)
+	}
+
+	confirmPrompt := promptui.Select{
+		Label: "Proceed with computation?",
+		Items: []string{"Yes", "No"},
+		Templates: &promptui.SelectTemplates{
+			Selected: "{{ . | green }}",
+		},
+	}
+	confirmIndex, _, _ := confirmPrompt.Run()
+	if confirmIndex != 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	paths := make([]string, numTables)
+
+	for i, cfg := range configs {
+		wg.Add(1)
+		go func(tableIndex int, config TableConfig) {
+			defer wg.Done()
+			fmt.Printf("\n%s Computing Table %d...\n", promptui.Styler(promptui.FGGreen)("[STARTED]"), tableIndex+1)
+			path := generateTableMultiThread(config.workerNumber, config.chainLength, config.passwordLength, baseCharset, config.chainsNumber)
+			paths[tableIndex] = path
+			fmt.Printf("%s Table %d generated: %s\n", promptui.Styler(promptui.FGGreen)("[DONE]"), tableIndex+1, filepath.Base(path))
+		}(i, cfg)
+	}
+
+	wg.Wait()
+
+	fmt.Println("\n" + promptui.Styler(promptui.FGBold, promptui.FGGreen)("All tables generated successfully!"))
+
+	if !tableAutoSort {
+		sortPrompt := promptui.Select{
+			Label: "Sort all tables?",
+			Items: []string{"Yes", "No"},
+			Templates: &promptui.SelectTemplates{
+				Selected: "{{ . | green }}",
+			},
+		}
+		sortIndex, _, _ := sortPrompt.Run()
+		if sortIndex == 0 {
+			fmt.Println("\n" + promptui.Styler(promptui.FGBold)("Sorting all tables..."))
+			for i, path := range paths {
+				if path != "" {
+					fmt.Printf("Sorting Table %d...\n", i+1)
+					SortLargeTable(path, sortingChunkSize)
+				}
+			}
+			fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
+		}
+	} else {
+		fmt.Println("\n" + promptui.Styler(promptui.FGBold)("Sorting all tables..."))
+		for i, path := range paths {
+			if path != "" {
+				fmt.Printf("Sorting Table %d...\n", i+1)
+				SortLargeTable(path, sortingChunkSize)
+			}
+		}
+		fmt.Println(promptui.Styler(promptui.FGGreen)("All tables sorted!"))
+	}
+}
+
 func settingsMenu(settings []Setting) ([]Setting, error) {
 	for {
-		// Generate menu options from settings
 		options := make([]string, len(settings)+1)
 		for i, setting := range settings {
 			var valueStr string
