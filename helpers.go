@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strings"
 )
 
 type FileHeader struct {
@@ -313,4 +314,37 @@ func estimateDiskUsage(chains uint64, passwordLength int, charset string) (float
 	}
 
 	return sizeMB, sizeStr
+}
+
+func displayCharset(charset string) string {
+	if len(charset) == 0 {
+		return ""
+	}
+
+	runes := []rune(charset)
+	var result strings.Builder
+
+	n := len(runes)
+	for i := 0; i < n; i++ {
+		start := i
+		// Look ahead to see how long the consecutive sequence is
+		for i+1 < n && runes[i+1] == runes[i]+1 {
+			i++
+		}
+
+		// We only show a range if it's 3 or more characters (e.g., 'abc' -> 'a-c')
+		// 'ab' is usually clearer as 'ab' than 'a-b'
+		if i-start >= 2 {
+			result.WriteRune(runes[start])
+			result.WriteByte('-')
+			result.WriteRune(runes[i])
+		} else {
+			// If it's just 1 or 2 chars, write them individually
+			for j := start; j <= i; j++ {
+				result.WriteRune(runes[j])
+			}
+		}
+	}
+
+	return result.String()
 }

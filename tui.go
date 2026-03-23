@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -248,7 +249,7 @@ func printListTables(directory string) {
 		if header.IsSorted != 0 {
 			sorted = "true"
 		}
-		fmt.Fprintf(w, "%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", i, table, header.Version, header.PasswordLength, header.ChainLength, header.NumChains, charset, sorted)
+		fmt.Fprintf(w, "%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n", i, table, header.Version, header.PasswordLength, header.ChainLength, header.NumChains, displayCharset(charset), sorted)
 	}
 	w.Flush()
 }
@@ -606,6 +607,11 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 
 		for passLen := minLen; passLen <= maxLen; passLen++ {
 			requiredChains := calculateRequiredChains(targetProb, baseChainLength, passLen, baseCharset)
+
+			fChains := float64(requiredChains)
+			exponent := math.Floor(math.Log10(fChains))
+			scale := math.Pow(10, exponent)
+			requiredChains = uint64(math.Ceil(fChains/scale) * scale)
 
 			sizeMB, sizeStr := estimateDiskUsage(requiredChains, passLen, baseCharset)
 			totalSizeMB += sizeMB
