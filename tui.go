@@ -496,9 +496,11 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 						fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
 					}
 				}
+				continue
 			case 1:
 				continue
 			}
+			return
 		case 1:
 			var err error
 			settings, err = settingsMenu(settings)
@@ -509,7 +511,6 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 			stay = false
 		}
 	}
-
 }
 
 func computeMultipleTables(settings []Setting, progressBar *mpb.Progress) {
