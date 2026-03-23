@@ -430,86 +430,81 @@ func printListTables(directory string) {
 }
 
 func computeTable(settings []Setting, progressBar *mpb.Progress) {
-	stay := true
-	for stay {
-		workerNumber := getSettingValue(settings, "workerNumber").(int)
-		chainLength := getSettingValue(settings, "chainLength").(int)
-		passwordLength := getSettingValue(settings, "passwordLength").(int)
-		charset := getSettingValue(settings, "charset").(string)
-		chainsNumber := getSettingValue(settings, "chainsNumber").(int)
-		sortingChunkSize := getSettingValue(settings, "sortingChunkSize").(int)
-		tableAutoSort := getSettingValue(settings, "tableAutoSort").(bool)
-		autoRemoveUnsortedTables := getSettingValue(settings, "autoRemoveUnsortedTables").(bool)
+	workerNumber := getSettingValue(settings, "workerNumber").(int)
+	chainLength := getSettingValue(settings, "chainLength").(int)
+	passwordLength := getSettingValue(settings, "passwordLength").(int)
+	charset := getSettingValue(settings, "charset").(string)
+	chainsNumber := getSettingValue(settings, "chainsNumber").(int)
+	sortingChunkSize := getSettingValue(settings, "sortingChunkSize").(int)
+	tableAutoSort := getSettingValue(settings, "tableAutoSort").(bool)
+	autoRemoveUnsortedTables := getSettingValue(settings, "autoRemoveUnsortedTables").(bool)
 
-		fmt.Println(promptui.Styler(promptui.FGBold)("\n--- Rainbow Table Configuration ---"))
-		fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Workers:"), workerNumber)
-		fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Chain Length:"), chainLength)
-		fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Password Length:"), passwordLength)
-		fmt.Printf("  %s %s\n", promptui.Styler(promptui.FGBlue)("Charset:"), charset)
-		fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Table Length:"), chainsNumber)
-		probaSuccess := calculateSuccessProbability(chainsNumber, chainLength, passwordLength, charset)
-		fmt.Printf("  %s %.2f%%\n", promptui.Styler(promptui.FGGreen)("Success Probability:"), probaSuccess*100)
-		prompt := promptui.Select{
-			Label: "Compute table?",
-			Items: []string{"Yes, Start Computing", "No, Change Settings", "Exit"},
-			Templates: &promptui.SelectTemplates{
-				Selected: "{{ . | green }}",
-			},
-		}
-		index, _, err := prompt.Run()
-		if err != nil {
-			fmt.Printf("Prompt failed %v\n", err)
-			return
+	fmt.Println(promptui.Styler(promptui.FGBold)("\n--- Rainbow Table Configuration ---"))
+	fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Workers:"), workerNumber)
+	fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Chain Length:"), chainLength)
+	fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Password Length:"), passwordLength)
+	fmt.Printf("  %s %s\n", promptui.Styler(promptui.FGBlue)("Charset:"), charset)
+	fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Table Length:"), chainsNumber)
+	probaSuccess := calculateSuccessProbability(chainsNumber, chainLength, passwordLength, charset)
+	fmt.Printf("  %s %.2f%%\n", promptui.Styler(promptui.FGGreen)("Success Probability:"), probaSuccess*100)
+	prompt := promptui.Select{
+		Label: "Compute table?",
+		Items: []string{"Yes, Start Computing", "No, Change Settings", "Exit"},
+		Templates: &promptui.SelectTemplates{
+			Selected: "{{ . | green }}",
+		},
+	}
+	index, _, err := prompt.Run()
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
+	}
+	switch index {
+	case 0:
+		var index int
+		tableDisplayName := fmt.Sprintf("PL%d_CL%d_TL%d", passwordLength, chainLength, chainsNumber)
+		path := generateTableMultiThread(workerNumber, chainLength, passwordLength, charset, chainsNumber, progressBar, tableDisplayName)
+		if tableAutoSort {
+			index = 0
+		} else {
+			prompt := promptui.Select{
+				Label: "Sort table?",
+				Items: []string{"Yes", "No"},
+				Templates: &promptui.SelectTemplates{
+					Selected: "{{ . | green }}",
+				},
+			}
+			index, _, err = prompt.Run()
+			if err != nil {
+				fmt.Printf("Prompt failed %v\n", err)
+				return
+			}
 		}
 		switch index {
 		case 0:
-			stay = false
-			var index int
-			tableDisplayName := fmt.Sprintf("PL%d_CL%d_TL%d", passwordLength, chainLength, chainsNumber)
-			path := generateTableMultiThread(workerNumber, chainLength, passwordLength, charset, chainsNumber, progressBar, tableDisplayName)
-			if tableAutoSort {
-				index = 0
-			} else {
-				prompt := promptui.Select{
-					Label: "Sort table?",
-					Items: []string{"Yes", "No"},
-					Templates: &promptui.SelectTemplates{
-						Selected: "{{ . | green }}",
-					},
-				}
-				index, _, err = prompt.Run()
+			SortLargeTable(path, sortingChunkSize, progressBar, tableDisplayName)
+			if autoRemoveUnsortedTables {
+				dir, _ := os.Getwd()
+				tablesDir := filepath.Join(dir, "tables")
+				removed, err := removeUnsortedTables(tablesDir)
 				if err != nil {
-					fmt.Printf("Prompt failed %v\n", err)
-					return
+					fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Auto remove unsorted tables failed: %v", err)))
+				} else if removed > 0 {
+					fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
 				}
 			}
-			switch index {
-			case 0:
-				SortLargeTable(path, sortingChunkSize, progressBar, tableDisplayName)
-				if autoRemoveUnsortedTables {
-					dir, _ := os.Getwd()
-					tablesDir := filepath.Join(dir, "tables")
-					removed, err := removeUnsortedTables(tablesDir)
-					if err != nil {
-						fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Auto remove unsorted tables failed: %v", err)))
-					} else if removed > 0 {
-						fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
-					}
-				}
-				continue
-			case 1:
-				continue
-			}
-			return
 		case 1:
-			var err error
-			settings, err = settingsMenu(settings)
-			if err != nil {
-				log.Fatal(err)
-			}
-		case 2:
-			stay = false
+			return
 		}
+		return
+	case 1:
+		var err error
+		settings, err = settingsMenu(settings)
+		if err != nil {
+			log.Fatal(err)
+		}
+	case 2:
+		return
 	}
 }
 
