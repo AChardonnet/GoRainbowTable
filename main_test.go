@@ -66,7 +66,7 @@ func TestGenerateChain(t *testing.T) {
 	wanted := TableEntry{
 		End: [32]byte(temp),
 	}
-	copy(wanted.Start[:], "a")
+	wanted.Start = []byte("a")
 
 	if !bytes.Equal(got.Start, wanted.Start) {
 		t.Errorf("Start mismatch: got %s, wanted %s", got.Start, wanted.Start)

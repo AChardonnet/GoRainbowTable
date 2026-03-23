@@ -16,20 +16,47 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
+type Setting struct {
+	Name        string
+	DisplayName string
+	Value       interface{}
+	Type        string // "int", "string", "bool"
+}
+
+func getSettingValue(settings []Setting, name string) interface{} {
+	for _, s := range settings {
+		if s.Name == name {
+			return s.Value
+		}
+	}
+	return nil
+}
+
+func setSettingValue(settings []Setting, name string, value interface{}) []Setting {
+	for i, s := range settings {
+		if s.Name == name {
+			settings[i].Value = value
+			break
+		}
+	}
+	return settings
+}
+
 func tui() {
 	stay := true
 
 	//default Settings
-	var (
-		charset          = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-"
-		passwordLength   = 6
-		chainLength      = 5000
-		chainsNumber     = 10000000
-		workerNumber     = 20
-		tableAutoSelect  = true
-		tableAutoSort    = true
-		sortingChunkSize = 2000000
-	)
+	settings := []Setting{
+		{Name: "workerNumber", DisplayName: "Workers", Value: 20, Type: "int"},
+		{Name: "chainLength", DisplayName: "Chain Length", Value: 5000, Type: "int"},
+		{Name: "passwordLength", DisplayName: "Password Length", Value: 6, Type: "int"},
+		{Name: "chainsNumber", DisplayName: "Chains Number", Value: 10000000, Type: "int"},
+		{Name: "charset", DisplayName: "Charset", Value: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#@+-", Type: "string"},
+		{Name: "tableAutoSelect", DisplayName: "Table Auto Select", Value: true, Type: "bool"},
+		{Name: "tableAutoSort", DisplayName: "Table Auto Sort", Value: true, Type: "bool"},
+		{Name: "tableAutoGenerate", DisplayName: "Table Auto Generate", Value: true, Type: "bool"},
+		{Name: "sortingChunkSize", DisplayName: "Sorting Chunk Size", Value: 2000000, Type: "int"},
+	}
 
 	dir, _ := os.Getwd()
 	tablesDir := filepath.Join(dir, "tables")
@@ -55,11 +82,12 @@ func tui() {
 		case 0:
 			printListTables(tablesDir)
 		case 1:
-			computeTable(workerNumber, chainLength, passwordLength, charset, chainsNumber, sortingChunkSize, tableAutoSort)
+			computeTable(settings)
 		case 2:
-			searchPassword(tablesDir, workerNumber, tableAutoSelect)
+			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool))
 		case 3:
-			err, workerNumber, chainLength, passwordLength, charset, chainsNumber, tableAutoSelect = settingsMenu(workerNumber, chainLength, passwordLength, charset, chainsNumber, tableAutoSelect)
+			var err error
+			settings, err = settingsMenu(settings)
 			if err != nil {
 				fmt.Printf("Settings menu error: %v\n", err)
 			}
@@ -128,9 +156,17 @@ func printListTables(directory string) {
 	w.Flush()
 }
 
-func computeTable(workerNumber int, chainLength int, passwordLength int, charset string, chainsNumber int, sortingChunkSize int, tableAutoSort bool) {
+func computeTable(settings []Setting) {
 	stay := true
 	for stay {
+		workerNumber := getSettingValue(settings, "workerNumber").(int)
+		chainLength := getSettingValue(settings, "chainLength").(int)
+		passwordLength := getSettingValue(settings, "passwordLength").(int)
+		charset := getSettingValue(settings, "charset").(string)
+		chainsNumber := getSettingValue(settings, "chainsNumber").(int)
+		sortingChunkSize := getSettingValue(settings, "sortingChunkSize").(int)
+		tableAutoSort := getSettingValue(settings, "tableAutoSort").(bool)
+
 		fmt.Println(promptui.Styler(promptui.FGBold)("\n--- Rainbow Table Configuration ---"))
 		fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Workers:"), workerNumber)
 		fmt.Printf("  %s %d\n", promptui.Styler(promptui.FGBlue)("Chain Length:"), chainLength)
@@ -171,7 +207,7 @@ func computeTable(workerNumber int, chainLength int, passwordLength int, charset
 			}
 		case 1:
 			var err error
-			err, workerNumber, chainLength, passwordLength, charset, chainsNumber, _ = settingsMenu(workerNumber, chainLength, passwordLength, charset, chainsNumber, true)
+			settings, err = settingsMenu(settings)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -182,18 +218,23 @@ func computeTable(workerNumber int, chainLength int, passwordLength int, charset
 
 }
 
-func settingsMenu(workerNumber int, chainLength int, passwordLength int, charset string, chainsNumber int, tableAutoSelect bool) (error, int, int, int, string, int, bool) {
+func settingsMenu(settings []Setting) ([]Setting, error) {
 	for {
-		// 1. Define the labels with current values for the menu
-		options := []string{
-			fmt.Sprintf("Workers: %d", workerNumber),
-			fmt.Sprintf("Chain Length: %d", chainLength),
-			fmt.Sprintf("Password Length: %d", passwordLength),
-			fmt.Sprintf("Chains Number: %d", chainsNumber),
-			fmt.Sprintf("Charset: %s", charset),
-			fmt.Sprintf("Table Auto Select: %t", tableAutoSelect),
-			"Back to Main Menu",
+		// Generate menu options from settings
+		options := make([]string, len(settings)+1)
+		for i, setting := range settings {
+			var valueStr string
+			switch setting.Type {
+			case "int":
+				valueStr = fmt.Sprintf("%d", setting.Value.(int))
+			case "string":
+				valueStr = setting.Value.(string)
+			case "bool":
+				valueStr = fmt.Sprintf("%t", setting.Value.(bool))
+			}
+			options[i] = fmt.Sprintf("%s: %s", setting.DisplayName, valueStr)
 		}
+		options[len(settings)] = "Back to Main Menu"
 
 		menu := promptui.Select{
 			Label: "Select a setting to modify",
@@ -201,44 +242,45 @@ func settingsMenu(workerNumber int, chainLength int, passwordLength int, charset
 			Templates: &promptui.SelectTemplates{
 				Selected: "{{ . | green }}",
 			},
-			Size: 7,
+			Size: len(options),
 		}
 
 		index, _, err := menu.Run()
 		if err != nil {
-			return err, 0, 0, 0, "", 0, false
+			return settings, err
 		}
 
 		// Handle "Back" option
-		if index == 6 {
+		if index == len(settings) {
 			break
 		}
 
-		// 2. Prompt for the new value
-		err, workerNumber, chainLength, passwordLength, charset, chainsNumber, tableAutoSelect = updateSetting(
-			index, workerNumber, chainLength, passwordLength, charset, chainsNumber, tableAutoSelect,
-		)
+		// Update the setting
+		settings, err = updateSetting(settings, index)
+		if err != nil {
+			return settings, err
+		}
 	}
-	return nil, workerNumber, chainLength, passwordLength, charset, chainsNumber, tableAutoSelect
+	return settings, nil
 }
 
-func updateSetting(index int, workerNumber int, chainLength int, passwordLength int, charset string, chainsNumber int, tableAutoSelect bool) (error, int, int, int, string, int, bool) {
-	labels := []string{"Workers", "Chain Length", "Password Length", "Chains Number", "Charset", "Table Auto Select"}
+func updateSetting(settings []Setting, index int) ([]Setting, error) {
+	setting := &settings[index]
 
 	prompt := promptui.Prompt{
-		Label: fmt.Sprintf("Enter new value for %s", labels[index]),
-		// Basic validation to ensure numbers are numbers
+		Label: fmt.Sprintf("Enter new value for %s", setting.DisplayName),
 		Validate: func(input string) error {
-			if index < 4 { // Indices 0-3 are integers
+			switch setting.Type {
+			case "int":
 				_, err := strconv.Atoi(input)
 				if err != nil {
 					return fmt.Errorf("please enter a valid number")
 				}
-			} else if index == 4 { // Charset
+			case "string":
 				if len(input) == 0 {
 					return fmt.Errorf("input cannot be empty")
 				}
-			} else if index == 5 { // Table Auto Select
+			case "bool":
 				lower := strings.ToLower(input)
 				if lower != "true" && lower != "false" && lower != "yes" && lower != "no" {
 					return fmt.Errorf("please enter true, false, yes, or no")
@@ -250,26 +292,25 @@ func updateSetting(index int, workerNumber int, chainLength int, passwordLength 
 
 	result, err := prompt.Run()
 	if err != nil {
-		return err, 0, 0, 0, "", 0, false
+		return settings, err
 	}
 
-	// 3. Update the global/struct variables
-	switch index {
-	case 0:
-		workerNumber, _ = strconv.Atoi(result)
-	case 1:
-		chainLength, _ = strconv.Atoi(result)
-	case 2:
-		passwordLength, _ = strconv.Atoi(result)
-	case 3:
-		chainsNumber, _ = strconv.Atoi(result)
-	case 4:
-		charset = generateCharset(result)
-	case 5:
+	// Update the setting value based on type
+	switch setting.Type {
+	case "int":
+		setting.Value, _ = strconv.Atoi(result)
+	case "string":
+		if setting.Name == "charset" {
+			setting.Value = generateCharset(result)
+		} else {
+			setting.Value = result
+		}
+	case "bool":
 		lower := strings.ToLower(result)
-		tableAutoSelect = lower == "true" || lower == "yes"
+		setting.Value = lower == "true" || lower == "yes"
 	}
-	return nil, workerNumber, chainLength, passwordLength, charset, chainsNumber, tableAutoSelect
+
+	return settings, nil
 }
 
 func searchPasswordKnownLength(targetHash [32]byte, tablePath string, workerNumber int) (string, bool) {
@@ -365,29 +406,38 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 			fmt.Printf("Prompt failed %v\n", err)
 			return
 		}
-		searchPasswordKnownLength([32]byte(hash), selectTable(tablesDir, passwordLength, 1, tableAutoSelect), workerNumber)
+		selectedTable, found := selectTable(tablesDir, passwordLength, 1, tableAutoSelect)
+		if found {
+			searchPasswordKnownLength([32]byte(hash), selectedTable, workerNumber)
+		} else {
+			fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)("No Table found for password Length"))
+		}
 	case 1:
-		for i := 0; i < 5; i++ {
-			availableTables := selectTable(tablesDir, i, 1, tableAutoSelect)
+		for i := 1; i < 6; i++ {
+			availableTables, _ := selectTable(tablesDir, i, 1, tableAutoSelect)
 			if len(availableTables) > 0 {
-				_, found := searchPasswordKnownLength([32]byte(hash), selectTable(tablesDir, i, 1, tableAutoSelect), workerNumber)
+				_, found := searchPasswordKnownLength([32]byte(hash), availableTables, workerNumber)
 				if found {
 					break
 				}
-			} else {
-				fmt.Printf(" %s %d\n", promptui.Styler(promptui.FGBold, promptui.FGRed)("No Table found for password Length"), i)
 			}
 		}
 	}
 }
 
-func selectTable(directory string, passwordLength int, sorted int, autoSelect bool) string {
+func selectTable(directory string, passwordLength int, sorted int, autoSelect bool) (path string, found bool) {
 	tables, _ := listTables(directory, sorted, passwordLength)
+
+	if len(tables) == 0 {
+		fmt.Printf(" %s\n", promptui.Styler(promptui.FGBold, promptui.FGRed)(fmt.Sprintf("No matching tables found (Sorted Filter: %d, PassLen Filter: %d)", sorted, passwordLength)))
+		return "", false
+	}
+
 	wDir, _ := os.Getwd()
 	if autoSelect {
 		fmt.Println(tables)
 		path, _ := filepath.Rel(wDir, filepath.Join(directory, tables[0]))
-		return path
+		return path, true
 	} else {
 		prompt := promptui.Select{
 			Label: "Select a Table",
@@ -397,6 +447,6 @@ func selectTable(directory string, passwordLength int, sorted int, autoSelect bo
 
 		_, result, _ := prompt.Run()
 		path, _ := filepath.Rel(wDir, filepath.Join(directory, result))
-		return path
+		return path, true
 	}
 }
