@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
@@ -201,7 +202,8 @@ func mergeChunks(header FileHeader, charset string, tempPaths []string, mainBar 
 	dir, _ := os.Getwd()
 	tablesDir := filepath.Join(dir, "tables")
 	creationTime := time.Now().Format("2006-01-02_15-04-05")
-	outputPath := filepath.Join(tablesDir, creationTime+".rtable")
+	tableName := creationTime + "_" + uuid.New().String()[:8]
+	outputPath := filepath.Join(tablesDir, tableName+".rtable")
 
 	out, _ := os.Create(outputPath)
 	defer out.Close()

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
@@ -140,7 +141,8 @@ func generateTableMultiThread(workerNumber int, chainLength int, passwordLength 
 	}
 
 	creationTime := time.Now().Format("2006-01-02_15-04-05")
-	path = filepath.Join(tablesDir, creationTime+".rtable")
+	tableName := creationTime + "_" + uuid.New().String()[:8]
+	path = filepath.Join(tablesDir, tableName+".rtable")
 
 	file, err := os.Create(path)
 	if err != nil {
