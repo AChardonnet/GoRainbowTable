@@ -42,6 +42,15 @@ type SettingsData struct {
 	SortingChunkSize         int    `json:"sortingChunkSize"`
 }
 
+func settingsFilePath() (string, error) {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(workDir, ".GoRainbowTable", "settings.json"), nil
+}
+
 func getSettingValue(settings []Setting, name string) interface{} {
 	for _, s := range settings {
 		if s.Name == name {
@@ -93,8 +102,16 @@ func dataToSettings(data SettingsData) []Setting {
 
 func saveSettings(settings []Setting) error {
 	data := settingsToData(settings)
+	settingsPath, err := settingsFilePath()
+	if err != nil {
+		return fmt.Errorf("failed to resolve settings path: %w", err)
+	}
 
-	file, err := os.Create("settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
+		return fmt.Errorf("failed to create settings directory: %w", err)
+	}
+
+	file, err := os.Create(settingsPath)
 	if err != nil {
 		return fmt.Errorf("failed to create settings file: %w", err)
 	}
@@ -111,7 +128,12 @@ func saveSettings(settings []Setting) error {
 }
 
 func loadSettings() ([]Setting, error) {
-	file, err := os.Open("settings.json")
+	settingsPath, err := settingsFilePath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve settings path: %w", err)
+	}
+
+	file, err := os.Open(settingsPath)
 	if err != nil {
 		// If file doesn't exist, return default settings
 		if os.IsNotExist(err) {

@@ -9,7 +9,7 @@ services:
           memory: 200G        
     
     volumes:
-      - rainbow_data:/app
+      - /mnt/stockage/rainbow_project/.settings:/app/.GoRainbowTable
       - /mnt/stockage/rainbow_project/tables:/app/tables
     
     tmpfs:
