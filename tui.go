@@ -185,8 +185,10 @@ func tui() {
 			printListTables(tablesDir)
 		case 1:
 			computeTable(settings, progressBar)
+			progressBar.Wait()
 		case 2:
 			computeMultipleTables(settings, progressBar)
+			progressBar.Wait()
 		case 3:
 			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool))
 		case 4:
@@ -200,7 +202,6 @@ func tui() {
 		case 6:
 			stay = false
 		}
-		progressBar.Wait()
 	}
 }
 
