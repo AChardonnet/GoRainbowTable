@@ -493,6 +493,7 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 					fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Auto removed %d unsorted tables", removed)))
 				}
 			}
+			return
 		case 1:
 			return
 		}
@@ -503,6 +504,7 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 		if err != nil {
 			log.Fatal(err)
 		}
+		return
 	case 2:
 		return
 	}
