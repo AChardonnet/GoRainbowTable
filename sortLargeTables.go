@@ -52,7 +52,11 @@ func (h *MergeHeap) Pop() any {
 func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, tableDisplayName string) error {
 	fileName := filepath.Base(inputPath)
 	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
-	tmpDir := filepath.Join(filepath.Dir(inputPath), "tmp")
+	workDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	tmpDir := filepath.Join(workDir, "tmp")
 
 	header, charset, err := readTableHeader(inputPath)
 	if err != nil {

@@ -9,10 +9,10 @@ services:
           memory: 200G        
     
     volumes:
-      - /mnt/stockage/rainbow_project/tables:/app/workDir/tables
+      - /mnt/stockage/rainbow_project/tables:/app/tables
     
     tmpfs:
-      - /app/workDir/tables/tmp:size=100G,mode=1777
+      - /app/tmp:size=100G,mode=1777
     
     environment:
       - TERM=xterm-256color   
