@@ -184,7 +184,7 @@ func tui() {
 			mpb.WithAutoRefresh(),
 			mpb.WithOutput(os.Stderr),
 		)
-		items := []string{"List Tables", "Compute Table", "Compute Multiple Tables", "Search Table", "PruneTable", "Settings", "Exit"}
+		items := []string{"List Tables", "Compute Table", "Compute Multiple Tables", "Search Table", "PruneTable", "Sort Table", "Settings", "Exit"}
 
 		prompt := promptui.Select{
 			Label: "Select Action",
@@ -192,7 +192,7 @@ func tui() {
 			Templates: &promptui.SelectTemplates{
 				Selected: "{{ . | green }}",
 			},
-			Size: 7,
+			Size: 8,
 		}
 
 		index, _, err := prompt.Run()
@@ -216,12 +216,15 @@ func tui() {
 		case 4:
 			pruneTablesMenu(tablesDir)
 		case 5:
+			sortTableMenu(tablesDir, settings, progressBar)
+			progressBar.Wait()
+		case 6:
 			var err error
 			settings, err = settingsMenu(settings)
 			if err != nil {
 				fmt.Printf("Settings menu error: %v\n", err)
 			}
-		case 6:
+		case 7:
 			stay = false
 		}
 	}
@@ -264,6 +267,37 @@ func pruneTablesMenu(directory string) {
 			stay = false
 		}
 	}
+}
+
+func sortTableMenu(directory string, settings []Setting, progressBar *mpb.Progress) {
+	tables, err := listTables(directory, 0, -1, false)
+	if err != nil || len(tables) == 0 {
+		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("No unsorted tables found")))
+		return
+	}
+
+	prompt := promptui.Select{
+		Label: "Select a Table to Sort",
+		Items: tables,
+		Size:  10,
+	}
+
+	_, result, err := prompt.Run()
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	wDir, _ := os.Getwd()
+	selectedPath, _ := filepath.Rel(wDir, filepath.Join(directory, result))
+	chunkSize := getSettingValue(settings, "sortingChunkSize").(int)
+
+	if err := SortLargeTable(selectedPath, chunkSize, progressBar, result); err != nil {
+		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Failed to sort table: %v", err)))
+		return
+	}
+
+	fmt.Printf(" %s\n", promptui.Styler(promptui.FGGreen)(fmt.Sprintf("Table sorted successfully: %s", result)))
 }
 
 func removeUnsortedTables(directory string) (int, error) {
