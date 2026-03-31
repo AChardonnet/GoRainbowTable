@@ -272,7 +272,7 @@ func pruneTablesMenu(directory string) {
 func sortTableMenu(directory string, settings []Setting, progressBar *mpb.Progress) {
 	tables, err := listTables(directory, 0, -1, false)
 	if err != nil || len(tables) == 0 {
-		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("No unsorted tables found")))
+		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)("No unsorted tables found"))
 		return
 	}
 
@@ -291,8 +291,9 @@ func sortTableMenu(directory string, settings []Setting, progressBar *mpb.Progre
 	wDir, _ := os.Getwd()
 	selectedPath, _ := filepath.Rel(wDir, filepath.Join(directory, result))
 	chunkSize := getSettingValue(settings, "sortingChunkSize").(int)
+	workerNumber := getSettingValue(settings, "workerNumber").(int)
 
-	if err := SortLargeTable(selectedPath, chunkSize, progressBar, result); err != nil {
+	if err := SortLargeTable(selectedPath, chunkSize, progressBar, result, workerNumber); err != nil {
 		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Failed to sort table: %v", err)))
 		return
 	}
@@ -539,7 +540,7 @@ func computeTable(settings []Setting, progressBar *mpb.Progress) {
 		}
 		switch index {
 		case 0:
-			SortLargeTable(path, sortingChunkSize, progressBar, tableDisplayName)
+			SortLargeTable(path, sortingChunkSize, progressBar, tableDisplayName, workerNumber)
 			if autoRemoveUnsortedTables {
 				dir, _ := os.Getwd()
 				tablesDir := filepath.Join(dir, "tables")
@@ -751,7 +752,7 @@ func computeMultipleTablesManual(settings []Setting, progressBar *mpb.Progress) 
 			for i, path := range paths {
 				if path != "" {
 					fmt.Printf("Sorting Table %d...\n", i+1)
-					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1), baseWorkerNumber)
 				}
 			}
 			if autoRemoveUnsortedTables {
@@ -771,7 +772,7 @@ func computeMultipleTablesManual(settings []Setting, progressBar *mpb.Progress) 
 		for i, path := range paths {
 			if path != "" {
 				fmt.Printf("Sorting Table %d...\n", i+1)
-				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1), baseWorkerNumber)
 			}
 		}
 		if autoRemoveUnsortedTables {
@@ -803,6 +804,7 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 	var configs []TableConfig
 	var totalSizeMB float64
 	var baseCharset string
+	var baseWorkerNumber int
 	configuring := true
 	for configuring {
 		// Get target probability
@@ -858,7 +860,7 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 		maxLen, _ := strconv.Atoi(strings.TrimSpace(rangeParts[1]))
 
 		// Get base settings
-		baseWorkerNumber := getSettingValue(settings, "workerNumber").(int)
+		baseWorkerNumber = getSettingValue(settings, "workerNumber").(int)
 		baseChainLength := getSettingValue(settings, "chainLength").(int)
 		baseCharset = getSettingValue(settings, "charset").(string)
 		sortingChunkSize = getSettingValue(settings, "sortingChunkSize").(int)
@@ -965,7 +967,7 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 			fmt.Println("\n" + promptui.Styler(promptui.FGBold)("Sorting all tables..."))
 			for i, path := range paths {
 				if path != "" {
-					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+					SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1), baseWorkerNumber)
 				}
 			}
 			if autoRemoveUnsortedTables {
@@ -984,7 +986,7 @@ func computeMultipleTablesAuto(settings []Setting, progressBar *mpb.Progress) {
 		fmt.Println("\n" + promptui.Styler(promptui.FGBold)("Sorting all tables..."))
 		for i, path := range paths {
 			if path != "" {
-				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1))
+				SortLargeTable(path, sortingChunkSize, progressBar, strconv.Itoa(i+1), baseWorkerNumber)
 			}
 		}
 		if autoRemoveUnsortedTables {

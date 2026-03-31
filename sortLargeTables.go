@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"container/heap"
 	"encoding/binary"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,7 +51,7 @@ func (h *MergeHeap) Pop() any {
 	return x
 }
 
-func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, tableDisplayName string) error {
+func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, tableDisplayName string, numWorkers int) error {
 	fileName := filepath.Base(inputPath)
 	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	workDir, err := os.Getwd()
@@ -91,12 +93,64 @@ func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, 
 	file.Seek(int64(headerSize+uint32(len(charset))+paddingSize), 0)
 
 	var tempFiles []string
+	var tempFilesMutex sync.Mutex
 
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return err
 	}
 
-	// --- PHASE 1: SPLIT AND SORT CHUNKS ---
+	// --- PHASE 1: SPLIT AND SORT CHUNKS (with concurrent sorting) ---
+	type ChunkJob struct {
+		ID   int
+		Data []TableEntry
+		Path string
+		Bars struct {
+			Sort  *mpb.Bar
+			Save  *mpb.Bar
+			Chunk *mpb.Bar
+		}
+	}
+
+	chunkChan := make(chan *ChunkJob, 4) // Buffer channel for concurrent processing
+	var wg sync.WaitGroup
+
+	// Start worker goroutines for sorting and saving chunks
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range chunkChan {
+				// Sort chunk in RAM
+				sort.Slice(job.Data, func(i, j int) bool {
+					return bytes.Compare(job.Data[i].End[:], job.Data[j].End[:]) < 0
+				})
+				job.Bars.Sort.SetTotal(1, true)
+
+				// Save temp file with buffered writer
+				tempFile, _ := os.Create(job.Path)
+				bufWriter := bufio.NewWriterSize(tempFile, 256*1024) // 256KB buffer
+				progressUpdate := 0
+				for _, entry := range job.Data {
+					bufWriter.Write(entry.Start)
+					bufWriter.Write(entry.End[:])
+					if progressUpdate%1000 == 0 {
+						job.Bars.Save.IncrBy(1000)
+						job.Bars.Chunk.IncrBy(1000)
+						mainBar.IncrBy(1000)
+					}
+					progressUpdate++
+				}
+				bufWriter.Flush()
+				tempFile.Sync()
+				tempFile.Close()
+
+				job.Bars.Save.IncrBy(progressUpdate % 1000)
+				job.Bars.Chunk.IncrBy(progressUpdate % 1000)
+				mainBar.IncrBy(progressUpdate % 1000)
+			}
+		}()
+	}
+
 	usedChains := 0
 	chunkId := 0
 	for {
@@ -150,8 +204,8 @@ func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, 
 		chunkBar.IncrBy(progressUpdate % 1000)
 		readBar.IncrBy(progressUpdate % 1000)
 
-		// Sort chunk in RAM
-		sortBar := progressBar.AddBar(0, // 0 total makes it a spinner/infinite bar
+		// Create job for sorting and saving (enqueue to workers)
+		sortBar := progressBar.AddBar(0,
 			mpb.PrependDecorators(
 				decor.Name(fmt.Sprintf("Sorting Chunk %d ", chunkId)),
 				decor.Elapsed(decor.ET_STYLE_GO),
@@ -159,38 +213,33 @@ func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, 
 			mpb.AppendDecorators(decor.OnComplete(decor.Spinner(nil), "done!")),
 			mpb.BarRemoveOnComplete(),
 		)
-		sort.Slice(buffer, func(i, j int) bool {
-			return bytes.Compare(buffer[i].End[:], buffer[j].End[:]) < 0
-		})
-		sortBar.SetTotal(1, true)
-
-		// Save temp file
 		saveBar := progressBar.AddBar(int64(currentBarTotal),
 			mpb.PrependDecorators(decor.Name(fmt.Sprintf("Saving Chunk %d", chunkId))),
 			mpb.AppendDecorators(decor.Percentage()),
 			mpb.BarRemoveOnComplete(),
 		)
 		tempPath := filepath.Join(tmpDir, fmt.Sprintf("%s_%d.tmp", baseName, chunkId))
-		tempFile, _ := os.Create(tempPath)
-		progressUpdate = 0
-		for _, entry := range buffer {
-			tempFile.Write(entry.Start)
-			tempFile.Write(entry.End[:])
-			if progressUpdate%1000 == 0 {
-				saveBar.IncrBy(1000)
-				chunkBar.IncrBy(1000)
-				mainBar.IncrBy(1000)
-			}
-			progressUpdate++
-		}
-		saveBar.IncrBy(progressUpdate % 1000)
-		chunkBar.IncrBy(progressUpdate % 1000)
-		mainBar.IncrBy(progressUpdate % 1000)
 
-		tempFile.Close()
+		job := &ChunkJob{
+			ID:   chunkId,
+			Data: buffer,
+			Path: tempPath,
+		}
+		job.Bars.Sort = sortBar
+		job.Bars.Save = saveBar
+		job.Bars.Chunk = chunkBar
+
+		chunkChan <- job
+		tempFilesMutex.Lock()
 		tempFiles = append(tempFiles, tempPath)
+		tempFilesMutex.Unlock()
+
 		chunkId++
 	}
+
+	// Close channel and wait for all workers to finish
+	close(chunkChan)
+	wg.Wait()
 
 	// --- PHASE 2: MERGE CHUNKS ---
 	return mergeChunks(header, charset, tempFiles, mainBar, progressBar)
@@ -236,6 +285,9 @@ func mergeChunks(header FileHeader, charset string, tempPaths []string, mainBar 
 		}
 	}
 
+	// Use buffered writer for merge phase to reduce I/O calls
+	bufWriter := bufio.NewWriterSize(out, 256*1024) // 256KB write buffer
+
 	var lastWrittenHash [32]byte
 	var uniqueCount uint64 = 0
 	firstEntry := true
@@ -247,8 +299,8 @@ func mergeChunks(header FileHeader, charset string, tempPaths []string, mainBar 
 
 		// Deduplication Check
 		if firstEntry || !bytes.Equal(currentEntry.End[:], lastWrittenHash[:]) {
-			out.Write(currentEntry.Start)
-			out.Write(currentEntry.End[:])
+			bufWriter.Write(currentEntry.Start)
+			bufWriter.Write(currentEntry.End[:])
 
 			lastWrittenHash = currentEntry.End
 			uniqueCount++
@@ -268,6 +320,9 @@ func mergeChunks(header FileHeader, charset string, tempPaths []string, mainBar 
 	}
 	mainBar.IncrBy(2 * (progressUpdate % 1000))
 	mergeBar.IncrBy(2 * (progressUpdate % 1000))
+
+	// Flush buffer to disk before updating header
+	bufWriter.Flush()
 
 	header.NumChains = uniqueCount
 
