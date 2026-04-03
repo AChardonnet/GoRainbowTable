@@ -250,12 +250,11 @@ func searchWorkerOnDisk(
 				currentHash = hash(plain)
 			}
 
-			if progressBar != nil {
-				progressBar.Increment()
-			}
+			firstIdx, found, err := findFirstMatchingEndIndex(file, dataOffset, numChains, passwordLength, currentHash)
+
+			progressBar.Increment()
 			atomic.AddInt64(processed, 1)
 
-			firstIdx, found, err := findFirstMatchingEndIndex(file, dataOffset, numChains, passwordLength, currentHash)
 			if err != nil {
 				return
 			}
