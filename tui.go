@@ -212,7 +212,8 @@ func tui() {
 			computeMultipleTables(settings, progressBar)
 			progressBar.Wait()
 		case 3:
-			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool))
+			searchPassword(tablesDir, getSettingValue(settings, "workerNumber").(int), getSettingValue(settings, "tableAutoSelect").(bool), progressBar)
+			progressBar.Wait()
 		case 4:
 			pruneTablesMenu(tablesDir)
 		case 5:
@@ -1102,14 +1103,32 @@ func updateSetting(settings []Setting, index int) ([]Setting, error) {
 	return settings, nil
 }
 
-func searchPasswordKnownLength(targetHash [32]byte, tablePath string, workerNumber int) (string, bool) {
-	header, charset, table, _ := loadTableWithHeader(tablePath)
+func searchPasswordKnownLength(targetHash [32]byte, tablePath string, workerNumber int, progressBar *mpb.Progress) (string, bool) {
+	header, charset, err := readTableHeader(tablePath)
+	if err != nil {
+		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Failed to read table header: %v", err)))
+		return "", false
+	}
 
 	if header.IsSorted == 0 {
 		fmt.Printf(" %s\n", promptui.Styler(promptui.FGBold, promptui.FGRed)("THIS TABLE IS NOT SORTED THE SEARCH WON'T WORK"))
 	}
 
-	password, found := searchTableParallel(targetHash, table, workerNumber, int(header.ChainLength), int(header.PasswordLength), charset)
+	password, found, err := searchTableParallelFromDisk(
+		targetHash,
+		tablePath,
+		workerNumber,
+		int(header.ChainLength),
+		int(header.PasswordLength),
+		charset,
+		header.NumChains,
+		progressBar,
+	)
+
+	if err != nil {
+		fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)(fmt.Sprintf("Search failed: %v", err)))
+		return "", false
+	}
 
 	if found {
 		fmt.Printf(" %s %s\n", promptui.Styler(promptui.FGGreen)("Password Found"), password)
@@ -1119,7 +1138,7 @@ func searchPasswordKnownLength(targetHash [32]byte, tablePath string, workerNumb
 	return password, found
 }
 
-func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
+func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool, progressBar *mpb.Progress) {
 	validate := func(input string) error {
 		match, _ := regexp.MatchString("^[a-fA-F0-9]+$", input)
 		if !match {
@@ -1195,7 +1214,7 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 		}
 		selectedTable, found := selectTable(tablesDir, passwordLength, 1, tableAutoSelect)
 		if found {
-			searchPasswordKnownLength([32]byte(hash), selectedTable, workerNumber)
+			searchPasswordKnownLength([32]byte(hash), selectedTable, workerNumber, progressBar)
 		} else {
 			fmt.Printf(" %s\n", promptui.Styler(promptui.FGRed)("No Table found for password Length"))
 		}
@@ -1204,7 +1223,7 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool) {
 			availableTables, _ := selectTable(tablesDir, i, 1, tableAutoSelect)
 			if len(availableTables) > 0 {
 				fmt.Printf(" %s\n", promptui.Styler(promptui.FGBlue)(fmt.Sprintf("Searching for length %d", i)))
-				_, found := searchPasswordKnownLength([32]byte(hash), availableTables, workerNumber)
+				_, found := searchPasswordKnownLength([32]byte(hash), availableTables, workerNumber, progressBar)
 				if found {
 					break
 				}

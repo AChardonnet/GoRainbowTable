@@ -111,7 +111,7 @@ func SortLargeTable(inputPath string, chunkSize int, progressBar *mpb.Progress, 
 		}
 	}
 
-	chunkChan := make(chan *ChunkJob, 4) // Buffer channel for concurrent processing
+	chunkChan := make(chan *ChunkJob, numWorkers*10) // Buffer channel for concurrent processing
 	var wg sync.WaitGroup
 
 	// Start worker goroutines for sorting and saving chunks

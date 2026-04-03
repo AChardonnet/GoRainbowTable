@@ -29,6 +29,13 @@ type TableEntry struct {
 	End   [32]byte
 }
 
+func binaryTableDataOffset(charsetLength int) int64 {
+	headerSize := uint32(binary.Size(FileHeader{}))
+	currentPos := headerSize + uint32(charsetLength)
+	paddingSize := (8 - (currentPos % 8)) % 8
+	return int64(currentPos + paddingSize)
+}
+
 func printIfVerbose(isVerbose bool, format string, a ...any) {
 	if isVerbose {
 		fmt.Printf(format, a...)
