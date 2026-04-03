@@ -1222,7 +1222,7 @@ func searchPassword(tablesDir string, workerNumber int, tableAutoSelect bool, pr
 		for i := 1; i < 21; i++ {
 			availableTables, _ := selectTable(tablesDir, i, 1, tableAutoSelect)
 			if len(availableTables) > 0 {
-				fmt.Printf(" %s\n", promptui.Styler(promptui.FGBlue)(fmt.Sprintf("Searching for length %d", i)))
+				fmt.Printf(" %s\n\n", promptui.Styler(promptui.FGBlue)(fmt.Sprintf("Searching for length %d", i)))
 				_, found := searchPasswordKnownLength([32]byte(hash), availableTables, workerNumber, progressBar)
 				if found {
 					break
